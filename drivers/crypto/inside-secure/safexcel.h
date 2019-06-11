@@ -38,6 +38,19 @@
 	char __##name##_desc[size] CRYPTO_MINALIGN_ATTR; \
 	struct type##_request *name = (void *)__##name##_desc
 
+/* Xilinx dev board base offsets */
+#define XILINX_GPIO_BASE                0x200000
+#define XILINX_IRQ_BLOCK_ID		0x2000
+#define XILINX_USER_INT_ENB_MSK		0x2004
+#define XILINX_USER_INT_ENB_SET		0x2008
+#define XILINX_USER_INT_ENB_CLEAR	0x200c
+#define XILINX_USER_INT_BLOCK		0x2040
+#define XILINX_USER_INT_PEND		0x2048
+#define XILINX_USER_VECT_LUT0		0x2080
+#define XILINX_USER_VECT_LUT1		0x2084
+#define XILINX_USER_VECT_LUT2		0x2088
+#define XILINX_USER_VECT_LUT3		0x208c
+
 /* Register base offsets */
 #define EIP197_HIA_AIC(priv)		((priv)->base + (priv)->offsets.hia_aic)
 #define EIP197_HIA_AIC_G(priv)		((priv)->base + (priv)->offsets.hia_aic_g)
@@ -581,10 +594,14 @@ struct safexcel_ring {
 	struct crypto_async_request *backlog;
 };
 
+/* EIP integration context flags */
 enum safexcel_eip_version {
+	/* for Marvell Armada BW compatibility */
 	EIP97IES = BIT(0),
 	EIP197B  = BIT(1),
 	EIP197D  = BIT(2),
+	XILINX_PCIE   = BIT(3),
+	DEVICE_IS_PCI = BIT(4),
 };
 
 struct safexcel_register_offsets {
