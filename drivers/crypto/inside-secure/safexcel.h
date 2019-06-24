@@ -39,17 +39,25 @@
 	struct type##_request *name = (void *)__##name##_desc
 
 /* Xilinx dev board base offsets */
-#define XILINX_GPIO_BASE                0x200000
-#define XILINX_IRQ_BLOCK_ID		0x2000
-#define XILINX_USER_INT_ENB_MSK		0x2004
-#define XILINX_USER_INT_ENB_SET		0x2008
-#define XILINX_USER_INT_ENB_CLEAR	0x200c
-#define XILINX_USER_INT_BLOCK		0x2040
-#define XILINX_USER_INT_PEND		0x2048
-#define XILINX_USER_VECT_LUT0		0x2080
-#define XILINX_USER_VECT_LUT1		0x2084
-#define XILINX_USER_VECT_LUT2		0x2088
-#define XILINX_USER_VECT_LUT3		0x208c
+#define EIP197_XLX_GPIO_BASE		0x200000
+#define EIP197_XLX_IRQ_BLOCK_ID_ADDR	0x2000
+#define EIP197_XLX_IRQ_BLOCK_ID_VALUE	0x1fc2
+#define EIP197_XLX_USER_INT_ENB_MSK	0x2004
+#define EIP197_XLX_USER_INT_ENB_SET	0x2008
+#define EIP197_XLX_USER_INT_ENB_CLEAR	0x200c
+#define EIP197_XLX_USER_INT_BLOCK	0x2040
+#define EIP197_XLX_USER_INT_PEND	0x2048
+#define EIP197_XLX_USER_VECT_LUT0_ADDR	0x2080
+#define EIP197_XLX_USER_VECT_LUT0_IDENT	0x03020100
+#define EIP197_XLX_USER_VECT_LUT1_ADDR	0x2084
+#define EIP197_XLX_USER_VECT_LUT1_IDENT	0x07060504
+#define EIP197_XLX_USER_VECT_LUT2_ADDR	0x2088
+#define EIP197_XLX_USER_VECT_LUT2_IDENT	0x0b0a0908
+#define EIP197_XLX_USER_VECT_LUT3_ADDR	0x208c
+#define EIP197_XLX_USER_VECT_LUT3_IDENT	0x0f0e0d0c
+
+/* Helper defines for probe function */
+#define EIP197_IRQ_NUMBER(i, is_pci)	(i + is_pci)
 
 /* Register base offsets */
 #define EIP197_HIA_AIC(priv)		((priv)->base + (priv)->offsets.hia_aic)
@@ -602,12 +610,11 @@ struct safexcel_ring {
 
 /* EIP integration context flags */
 enum safexcel_eip_version {
-	/* for Marvell Armada BW compatibility */
-	EIP97IES = BIT(0),
-	EIP197B  = BIT(1),
-	EIP197D  = BIT(2),
-	XILINX_PCIE   = BIT(3),
-	DEVICE_IS_PCI = BIT(4),
+	/* Platform (EIP integration context) specifier */
+	EIP97IES_MRVL,
+	EIP197B_MRVL,
+	EIP197D_MRVL,
+	EIP197_DEVBRD
 };
 
 struct safexcel_register_offsets {

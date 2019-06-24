@@ -33,16 +33,17 @@ static void eip197_trc_cache_init(struct safexcel_crypto_priv *priv)
 	u32 val, htable_offset;
 	int i, cs_rc_max, cs_ht_wc, cs_trc_rec_wc, cs_trc_lg_rec_wc;
 
-	if (priv->version & EIP197B) {
-		cs_rc_max = EIP197B_CS_RC_MAX;
-		cs_ht_wc = EIP197B_CS_HT_WC;
-		cs_trc_rec_wc = EIP197B_CS_TRC_REC_WC;
-		cs_trc_lg_rec_wc = EIP197B_CS_TRC_LG_REC_WC;
-	} else {
+	if (priv->version == EIP197D_MRVL) {
 		cs_rc_max = EIP197D_CS_RC_MAX;
 		cs_ht_wc = EIP197D_CS_HT_WC;
 		cs_trc_rec_wc = EIP197D_CS_TRC_REC_WC;
 		cs_trc_lg_rec_wc = EIP197D_CS_TRC_LG_REC_WC;
+	} else {
+		/* Default to minimum "safe" settings */
+		cs_rc_max = EIP197B_CS_RC_MAX;
+		cs_ht_wc = EIP197B_CS_HT_WC;
+		cs_trc_rec_wc = EIP197B_CS_TRC_REC_WC;
+		cs_trc_lg_rec_wc = EIP197B_CS_TRC_LG_REC_WC;
 	}
 
 	/* Enable the record cache memory access */
@@ -187,7 +188,7 @@ static bool poll_fw_ready(struct safexcel_crypto_priv *priv, int fpp)
 			cpu_relax();
 		}
 		if (!pollcnt) {
-			dev_err(priv->dev, "FW(%d) for PE %d failed to start",
+			dev_err(priv->dev, "FW(%d) for PE %d failed to start\n",
 				fpp, pe);
 			return false;
 		}
@@ -262,22 +263,24 @@ static int eip197_load_firmwares(struct safexcel_crypto_priv *priv)
 	int i, j, ret = 0, pe;
 	int ipuesz, ifppsz;
 
-	if (priv->version & EIP197B)
-		dir = "eip197b";
-	else if (priv->version & EIP197D)
-		dir = "eip197d";
-	else
+	if (priv->version == EIP97IES_MRVL)
 		/* No firmware is required */
 		return 0;
+	else if (priv->version == EIP197D_MRVL)
+		dir = "eip197d";
+	else
+		/* Default to minimum EIP197 config */
+		dir = "eip197b";
 
 	for (i = 0; i < FW_NB; i++) {
 		snprintf(fw_path, 31, "inside-secure/%s/%s", dir, fw_name[i]);
 		ret = firmware_request_nowarn(&fw[i], fw_path, priv->dev);
 		if (ret) {
-			if (!(priv->version & EIP197B))
+			if (!(priv->version == EIP197B_MRVL))
 				goto release_fw;
 
-			/* Fallback to the old firmware location for the
+			/*
+			 * Fallback to the old firmware location for the
 			 * EIP197b.
 			 */
 			ret = firmware_request_nowarn(&fw[i], fw_name[i],
@@ -299,7 +302,7 @@ static int eip197_load_firmwares(struct safexcel_crypto_priv *priv)
 	ipuesz = eip197_write_firmware(priv, fw[FW_IPUE]);
 
 	if (eip197_start_firmware(priv, ipuesz, ifppsz)) {
-		dev_info(priv->dev, "EIP197 firmware loaded successfully");
+		dev_dbg(priv->dev, "Firmware loaded successfully\n");
 		return 0;
 	}
 
@@ -308,11 +311,11 @@ release_fw:
 		release_firmware(fw[j]);
 
 	/*
-	 * Firmware download failed, fall back to EIP97 BCLA mode
+	 * Firmware download failed, fall back to "EIP"97 BCLA mode
 	 * Note that this is not a formally supported mode for the EIP197,
 	 * so your mileage may vary
 	 */
-	dev_info(priv->dev, "EIP197 firmware set not (fully) present or init failed, falling back to EIP97 BCLA mode");
+	dev_dbg(priv->dev, "Firmware set not (fully) present or init failed, falling back to EIP97 BCLA mode\n");
 
 	eip197_init_firmware(priv);
 
@@ -422,8 +425,8 @@ static int safexcel_hw_init(struct safexcel_crypto_priv *priv)
 	u32 version, val;
 	int i, ret, pe;
 
-	dev_info(priv->dev, "EIP(1)97 HW init: burst size %d beats, using %d pipe(s) and %d ring(s)",
-			16, priv->config.pes, priv->config.rings);
+	dev_dbg(priv->dev, "HW init: using %d pipe(s) and %d ring(s)\n",
+		priv->config.pes, priv->config.rings);
 
 	/* Determine endianess and configure byte swap */
 	version = readl(EIP197_HIA_AIC(priv) + EIP197_HIA_VERSION);
@@ -435,7 +438,7 @@ static int safexcel_hw_init(struct safexcel_crypto_priv *priv)
 		val |= (EIP197_MST_CTRL_NO_BYTE_SWAP >> 24);
 
 	/* For EIP197 set maximum number of TX commands to 2^5 = 32 */
-	if ((priv->version & EIP197B) || (priv->version & EIP197D))
+	if (priv->version != EIP97IES_MRVL)
 		val |= EIP197_MST_CTRL_TX_MAX_CMD(5);
 
 	writel(val, EIP197_HIA_AIC(priv) + EIP197_HIA_MST_CTRL);
@@ -461,7 +464,7 @@ static int safexcel_hw_init(struct safexcel_crypto_priv *priv)
 		writel(EIP197_DxE_THR_CTRL_RESET_PE,
 		       EIP197_HIA_DFE_THR(priv) + EIP197_HIA_DFE_THR_CTRL(pe));
 
-		if ((priv->version & EIP197B) || (priv->version & EIP197D))
+		if (priv->version != EIP97IES_MRVL)
 			/* Reset HIA input interface arbiter */
 			writel(EIP197_HIA_RA_PE_CTRL_RESET,
 			       EIP197_HIA_AIC(priv) + EIP197_HIA_RA_PE_CTRL(pe));
@@ -487,7 +490,7 @@ static int safexcel_hw_init(struct safexcel_crypto_priv *priv)
 		       EIP197_PE_IN_xBUF_THRES_MAX(7),
 		       EIP197_PE(priv) + EIP197_PE_IN_TBUF_THRES(pe));
 
-		if ((priv->version & EIP197B) || (priv->version & EIP197D))
+		if (priv->version != EIP97IES_MRVL)
 			/* enable HIA input interface arbiter and rings */
 			writel(EIP197_HIA_RA_PE_CTRL_EN |
 			       GENMASK(priv->config.rings - 1, 0),
@@ -510,10 +513,11 @@ static int safexcel_hw_init(struct safexcel_crypto_priv *priv)
 		       EIP197_HIA_DxE_CFG_MAX_DATA_SIZE(8);
 		val |= EIP197_HIA_DxE_CFG_DATA_CACHE_CTRL(WR_CACHE_3BITS);
 		val |= EIP197_HIA_DSE_CFG_ALWAYS_BUFFERABLE;
-		/* FIXME: instability issues can occur for EIP97 but disabling it impact
+		/*
+		 * FIXME: instability issues can occur for EIP97 but disabling it impact
 		 * performances.
 		 */
-		if ((priv->version & EIP197B) || (priv->version & EIP197D))
+		if (priv->version != EIP97IES_MRVL)
 			val |= EIP197_HIA_DSE_CFG_EN_SINGLE_WR;
 		writel(val, EIP197_HIA_DSE(priv) + EIP197_HIA_DSE_CFG(pe));
 
@@ -608,7 +612,7 @@ static int safexcel_hw_init(struct safexcel_crypto_priv *priv)
 	/* Clear any HIA interrupt */
 	writel(GENMASK(30, 20), EIP197_HIA_AIC_G(priv) + EIP197_HIA_AIC_G_ACK);
 
-	if ((priv->version & EIP197B) || (priv->version & EIP197D)) {
+	if (priv->version != EIP97IES_MRVL) {
 		eip197_trc_cache_init(priv);
 
 		ret = eip197_load_firmwares(priv);
@@ -643,7 +647,8 @@ void safexcel_dequeue(struct safexcel_crypto_priv *priv, int ring)
 	struct safexcel_context *ctx;
 	int ret, nreq = 0, cdesc = 0, rdesc = 0, commands, results;
 
-	/* If a request wasn't properly dequeued because of a lack of resources,
+	/*
+	 * If a request wasn't properly dequeued because of a lack of resources,
 	 * proceeded it first,
 	 */
 	req = priv->ring[ring].req;
@@ -672,7 +677,8 @@ handle_req:
 		if (backlog)
 			backlog->complete(backlog, -EINPROGRESS);
 
-		/* In case the send() helper did not issue any command to push
+		/*
+		 * In case the send() helper did not issue any command to push
 		 * to the engine because the input data was cached, continue to
 		 * dequeue other requests as this is valid and not an error.
 		 */
@@ -685,7 +691,8 @@ handle_req:
 	}
 
 request_failed:
-	/* Not enough resources to handle all the requests. Bail out and save
+	/*
+	 * Not enough resources to handle all the requests. Bail out and save
 	 * the request and the backlog for the next dequeue call (per-ring).
 	 */
 	priv->ring[ring].req = req;
@@ -840,7 +847,7 @@ handle_results:
 		ndesc = ctx->handle_result(priv, ring, req,
 					   &should_complete, &ret);
 		if (ndesc < 0) {
-			dev_err(priv->dev, "failed to handle result (%d)", ndesc);
+			dev_err(priv->dev, "failed to handle result (%d)\n", ndesc);
 			goto acknowledge;
 		}
 
@@ -860,7 +867,8 @@ acknowledge:
 		       EIP197_xDR_PROC_xD_COUNT(tot_descs * priv->config.rd_offset),
 		       EIP197_HIA_RDR(priv, ring) + EIP197_HIA_xDR_PROC_COUNT);
 
-	/* If the number of requests overflowed the counter, try to proceed more
+	/*
+	 * If the number of requests overflowed the counter, try to proceed more
 	 * requests.
 	 */
 	if (nreq == EIP197_xDR_PROC_xD_PKT_MASK)
@@ -912,7 +920,7 @@ static irqreturn_t safexcel_irq_ring(int irq, void *data)
 			 * reinitialized. This should not happen under
 			 * normal circumstances.
 			 */
-			dev_err(priv->dev, "RDR: fatal error.");
+			dev_err(priv->dev, "RDR: fatal error.\n");
 		} else if (likely(stat & EIP197_xDR_THRESH)) {
 			rc = IRQ_WAKE_THREAD;
 		}
@@ -957,7 +965,7 @@ static int safexcel_request_ring_irq(void *pdev, int irqid,
 		dev = &pci_pdev->dev;
 		irq = pci_irq_vector(pci_pdev, irqid);
 		if (irq < 0) {
-			dev_err(dev, "unable to get device MSI IRQ %d (err %d)",
+			dev_err(dev, "unable to get device MSI IRQ %d (err %d)\n",
 				irqid, irq);
 			return irq;
 		}
@@ -970,7 +978,7 @@ static int safexcel_request_ring_irq(void *pdev, int irqid,
 		irq = platform_get_irq_byname(plf_pdev, irq_name);
 
 		if (irq < 0) {
-			dev_err(dev, "unable to get IRQ '%s'\n (err %d)",
+			dev_err(dev, "unable to get IRQ '%s' (err %d)\n",
 				irq_name, irq);
 			return irq;
 		}
@@ -1020,9 +1028,6 @@ static int safexcel_register_algorithms(struct safexcel_crypto_priv *priv)
 	for (i = 0; i < ARRAY_SIZE(safexcel_algs); i++) {
 		safexcel_algs[i]->priv = priv;
 
-		if (!(safexcel_algs[i]->engines & priv->version))
-			continue;
-
 		if (safexcel_algs[i]->type == SAFEXCEL_ALG_TYPE_SKCIPHER)
 			ret = crypto_register_skcipher(&safexcel_algs[i]->alg.skcipher);
 		else if (safexcel_algs[i]->type == SAFEXCEL_ALG_TYPE_AEAD)
@@ -1038,9 +1043,6 @@ static int safexcel_register_algorithms(struct safexcel_crypto_priv *priv)
 
 fail:
 	for (j = 0; j < i; j++) {
-		if (!(safexcel_algs[j]->engines & priv->version))
-			continue;
-
 		if (safexcel_algs[j]->type == SAFEXCEL_ALG_TYPE_SKCIPHER)
 			crypto_unregister_skcipher(&safexcel_algs[j]->alg.skcipher);
 		else if (safexcel_algs[j]->type == SAFEXCEL_ALG_TYPE_AEAD)
@@ -1057,9 +1059,6 @@ static void safexcel_unregister_algorithms(struct safexcel_crypto_priv *priv)
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(safexcel_algs); i++) {
-		if (!(safexcel_algs[i]->engines & priv->version))
-			continue;
-
 		if (safexcel_algs[i]->type == SAFEXCEL_ALG_TYPE_SKCIPHER)
 			crypto_unregister_skcipher(&safexcel_algs[i]->alg.skcipher);
 		else if (safexcel_algs[i]->type == SAFEXCEL_ALG_TYPE_AEAD)
@@ -1076,7 +1075,7 @@ static void safexcel_configure(struct safexcel_crypto_priv *priv)
 	val = readl(EIP197_HIA_AIC_G(priv) + EIP197_HIA_OPTIONS);
 
 	/* Read number of PEs from the engine */
-	if (priv->version & EIP97IES)
+	if (priv->version == EIP97IES_MRVL)
 		mask = EIP97_N_PES_MASK;
 	else
 		mask = EIP197_N_PES_MASK;
@@ -1099,7 +1098,7 @@ static void safexcel_init_register_offsets(struct safexcel_crypto_priv *priv)
 {
 	struct safexcel_register_offsets *offsets = &priv->offsets;
 
-	if (priv->version & EIP97IES) {
+	if (priv->version == EIP97IES_MRVL) {
 		offsets->hia_aic	= EIP97_HIA_AIC_BASE;
 		offsets->hia_aic_g	= EIP97_HIA_AIC_G_BASE;
 		offsets->hia_aic_r	= EIP97_HIA_AIC_R_BASE;
@@ -1146,12 +1145,12 @@ static int safexcel_probe_generic(void *pdev,
 
 	safexcel_init_register_offsets(priv);
 
-	if ((priv->version & EIP197B) || (priv->version & EIP197D))
+	if (priv->version != EIP97IES_MRVL)
 		priv->flags |= EIP197_TRC_CACHE;
 
 	safexcel_configure(priv);
 
-	if (IS_ENABLED(CONFIG_PCI) && (priv->version & DEVICE_IS_PCI)) {
+	if (IS_ENABLED(CONFIG_PCI) && (priv->version == EIP197_DEVBRD)) {
 		/*
 		 * Request MSI vectors for global + 1 per ring -
 		 * or just 1 for older dev images
@@ -1161,9 +1160,9 @@ static int safexcel_probe_generic(void *pdev,
 		ret = pci_alloc_irq_vectors(pci_pdev,
 					    priv->config.rings + 1,
 					    priv->config.rings + 1,
-					    PCI_IRQ_MSI|PCI_IRQ_MSIX);
+					    PCI_IRQ_MSI | PCI_IRQ_MSIX);
 		if (ret < 0) {
-			dev_err(dev, "Failed to allocate PCI MSI interrupts");
+			dev_err(dev, "Failed to allocate PCI MSI interrupts\n");
 			return ret;
 		}
 	}
@@ -1172,10 +1171,8 @@ static int safexcel_probe_generic(void *pdev,
 	priv->ring = devm_kcalloc(dev, priv->config.rings,
 				  sizeof(*priv->ring),
 				  GFP_KERNEL);
-	if (!priv->ring) {
-		dev_err(dev, "Failed to allocate ring memory");
+	if (!priv->ring)
 		return -ENOMEM;
-	}
 
 	for (i = 0; i < priv->config.rings; i++) {
 		char wq_name[9] = {0};
@@ -1186,7 +1183,7 @@ static int safexcel_probe_generic(void *pdev,
 						     &priv->ring[i].cdr,
 						     &priv->ring[i].rdr);
 		if (ret) {
-			dev_err(dev, "Failed to initialize rings");
+			dev_err(dev, "Failed to initialize rings\n");
 			return ret;
 		}
 
@@ -1194,29 +1191,24 @@ static int safexcel_probe_generic(void *pdev,
 			EIP197_DEFAULT_RING_SIZE,
 			sizeof(priv->ring[i].rdr_req),
 			GFP_KERNEL);
-		if (!priv->ring[i].rdr_req) {
-			dev_err(dev, "Failed to allocate RDR async request queue for ring %d",
-				i);
+		if (!priv->ring[i].rdr_req)
 			return -ENOMEM;
-		}
 
 		ring_irq = devm_kzalloc(dev, sizeof(*ring_irq), GFP_KERNEL);
-		if (!ring_irq) {
-			dev_err(dev, "Failed to allocate IRQ data for ring %d",
-				i);
+		if (!ring_irq)
 			return -ENOMEM;
-		}
 
 		ring_irq->priv = priv;
 		ring_irq->ring = i;
 
-		irq = safexcel_request_ring_irq(pdev, i + is_pci_dev,
+		irq = safexcel_request_ring_irq(pdev,
+						EIP197_IRQ_NUMBER(i, is_pci_dev),
 						is_pci_dev,
 						safexcel_irq_ring,
 						safexcel_irq_ring_thread,
 						ring_irq);
 		if (irq < 0) {
-			dev_err(dev, "Failed to get IRQ ID for ring %d", i);
+			dev_err(dev, "Failed to get IRQ ID for ring %d\n", i);
 			return irq;
 		}
 
@@ -1228,13 +1220,12 @@ static int safexcel_probe_generic(void *pdev,
 		snprintf(wq_name, 9, "wq_ring%d", i);
 		priv->ring[i].workqueue =
 			create_singlethread_workqueue(wq_name);
-		if (!priv->ring[i].workqueue) {
-			dev_err(dev, "Failed to create work queue for ring %d",
-				i);
+		if (!priv->ring[i].workqueue)
 			return -ENOMEM;
-		}
+
 		priv->ring[i].requests = 0;
 		priv->ring[i].busy = false;
+
 		crypto_init_queue(&priv->ring[i].queue,
 				  EIP197_DEFAULT_RING_SIZE);
 
@@ -1246,13 +1237,13 @@ static int safexcel_probe_generic(void *pdev,
 
 	ret = safexcel_hw_init(priv);
 	if (ret) {
-		dev_err(dev, "EIP(1)97 h/w init failed (%d)", ret);
+		dev_err(dev, "HW init failed (%d)\n", ret);
 		return ret;
 	}
 
 	ret = safexcel_register_algorithms(priv);
 	if (ret) {
-		dev_err(dev, "Failed to register algorithms (%d)", ret);
+		dev_err(dev, "Failed to register algorithms (%d)\n", ret);
 		return ret;
 	}
 
@@ -1260,9 +1251,7 @@ static int safexcel_probe_generic(void *pdev,
 }
 
 /*
- *
  * for Device Tree platform driver
- *
  */
 
 static int safexcel_probe(struct platform_device *pdev)
@@ -1370,24 +1359,24 @@ static int safexcel_remove(struct platform_device *pdev)
 static const struct of_device_id safexcel_of_match_table[] = {
 	{
 		.compatible = "inside-secure,safexcel-eip97ies",
-		.data = (void *)EIP97IES,
+		.data = (void *)EIP97IES_MRVL,
 	},
 	{
 		.compatible = "inside-secure,safexcel-eip197b",
-		.data = (void *)EIP197B,
+		.data = (void *)EIP197B_MRVL,
 	},
 	{
 		.compatible = "inside-secure,safexcel-eip197d",
-		.data = (void *)EIP197D,
+		.data = (void *)EIP197D_MRVL,
 	},
-	/* For backward compatibiliry and intended for generic use */
+	/* For backward compatibility and intended for generic use */
 	{
 		.compatible = "inside-secure,safexcel-eip97",
-		.data = (void *)EIP97IES,
+		.data = (void *)EIP97IES_MRVL,
 	},
 	{
 		.compatible = "inside-secure,safexcel-eip197",
-		.data = (void *)EIP197B,
+		.data = (void *)EIP197B_MRVL,
 	},
 	{},
 };
@@ -1402,131 +1391,118 @@ static struct platform_driver  crypto_safexcel = {
 	},
 };
 
+#if(IS_ENABLED(CONFIG_PCI))
 /*
- *
  * PCIE devices - i.e. Inside Secure development boards
- *
  */
 
 static int crypto_is_pci_probe(struct pci_dev *pdev,
-	 const struct pci_device_id *ent)
+			       const struct pci_device_id *ent)
 {
-	if (IS_ENABLED(CONFIG_PCI)) {
-		struct device *dev = &pdev->dev;
-		struct safexcel_crypto_priv *priv;
-		void __iomem *pciebase;
-		int rc;
-		u32 val;
+	struct device *dev = &pdev->dev;
+	struct safexcel_crypto_priv *priv;
+	void __iomem *pciebase;
+	int rc;
+	u32 val;
 
-		dev_info(dev, "Probing PCIE device: vendor %04x, device %04x, subv %04x, subdev %04x, ctxt %lx",
-			 ent->vendor, ent->device, ent->subvendor,
-			 ent->subdevice, ent->driver_data);
+	dev_dbg(dev, "Probing PCIE device: vendor %04x, device %04x, subv %04x, subdev %04x, ctxt %lx\n",
+		ent->vendor, ent->device, ent->subvendor,
+		ent->subdevice, ent->driver_data);
 
-		priv = kzalloc(sizeof(*priv), GFP_KERNEL);
-		if (!priv) {
-			dev_err(dev, "Failed to allocate memory");
-			return -ENOMEM;
-		}
+	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
 
-		priv->dev = dev;
-		priv->version = (enum safexcel_eip_version)ent->driver_data;
+	priv->dev = dev;
+	priv->version = (enum safexcel_eip_version)ent->driver_data;
 
-		pci_set_drvdata(pdev, priv);
+	pci_set_drvdata(pdev, priv);
 
-		/* enable the device */
-		rc = pcim_enable_device(pdev);
-		if (rc) {
-			dev_err(dev, "pci_enable_device() failed");
-			return rc;
-		}
-
-		/* take ownership of PCI BAR0 */
-		rc = pcim_iomap_regions(pdev, 1, "crypto_safexcel");
-		if (rc) {
-			dev_err(dev, "pcim_iomap_regions() failed for BAR0");
-			return rc;
-		}
-		priv->base = pcim_iomap_table(pdev)[0];
-
-		if (priv->version & XILINX_PCIE) {
-			dev_info(dev, "Device identified as FPGA based development board - applying HW reset");
-
-			rc = pcim_iomap_regions(pdev, 4, "crypto_safexcel");
-			if (rc) {
-				dev_err(dev, "pcim_iomap_regions() failed for BAR4");
-				return rc;
-			}
-
-			pciebase = pcim_iomap_table(pdev)[2];
-			val = readl(pciebase + XILINX_IRQ_BLOCK_ID);
-			if ((val >> 16) == 0x1fc2) {
-				dev_info(dev, "Detected Xilinx PCIE IRQ block version %d, multiple MSI support enabled",
-					 (val & 0xff));
-
-				/* Setup MSI identity map mapping */
-				writel(0x03020100,
-				       pciebase + XILINX_USER_VECT_LUT0);
-				writel(0x07060504,
-				       pciebase + XILINX_USER_VECT_LUT1);
-				writel(0x0b0a0908,
-				       pciebase + XILINX_USER_VECT_LUT2);
-				writel(0x0f0e0d0c,
-				       pciebase + XILINX_USER_VECT_LUT3);
-
-				/* Enable all device interrupts */
-				writel(GENMASK(31, 0),
-				       pciebase + XILINX_USER_INT_ENB_MSK);
-			} else {
-				dev_err(dev, "Unrecognised IRQ block identifier %x",
-					val);
-				return -ENODEV;
-			}
-
-			/* HW reset FPGA dev board */
-			// assert reset
-			writel(1, priv->base + XILINX_GPIO_BASE);
-			wmb(); /* maintain strict ordering for accesses here */
-			// deassert reset
-			writel(0, priv->base + XILINX_GPIO_BASE);
-			wmb(); /* maintain strict ordering for accesses here */
-		}
-
-		/* enable bus mastering */
-		pci_set_master(pdev);
-
-		/* Generic EIP97/EIP197 device probing */
-		rc = safexcel_probe_generic(pdev, priv, 1);
-		if (rc)
-			return rc;
+	/* enable the device */
+	rc = pcim_enable_device(pdev);
+	if (rc) {
+		dev_err(dev, "Failed to enable PCI device\n");
+		return rc;
 	}
-	return 0;
+
+	/* take ownership of PCI BAR0 */
+	rc = pcim_iomap_regions(pdev, 1, "crypto_safexcel");
+	if (rc) {
+		dev_err(dev, "Failed to map IO region for BAR0\n");
+		return rc;
+	}
+	priv->base = pcim_iomap_table(pdev)[0];
+
+	if (priv->version == EIP197_DEVBRD) {
+		dev_dbg(dev, "Device identified as FPGA based development board - applying HW reset\n");
+
+		rc = pcim_iomap_regions(pdev, 4, "crypto_safexcel");
+		if (rc) {
+			dev_err(dev, "Failed to map IO region for BAR4\n");
+			return rc;
+		}
+
+		pciebase = pcim_iomap_table(pdev)[2];
+		val = readl(pciebase + EIP197_XLX_IRQ_BLOCK_ID_ADDR);
+		if ((val >> 16) == EIP197_XLX_IRQ_BLOCK_ID_VALUE) {
+			dev_dbg(dev, "Detected Xilinx PCIE IRQ block version %d, multiple MSI support enabled\n",
+				(val & 0xff));
+
+			/* Setup MSI identity map mapping */
+			writel(EIP197_XLX_USER_VECT_LUT0_IDENT,
+			       pciebase + EIP197_XLX_USER_VECT_LUT0_ADDR);
+			writel(EIP197_XLX_USER_VECT_LUT1_IDENT,
+			       pciebase + EIP197_XLX_USER_VECT_LUT1_ADDR);
+			writel(EIP197_XLX_USER_VECT_LUT2_IDENT,
+			       pciebase + EIP197_XLX_USER_VECT_LUT2_ADDR);
+			writel(EIP197_XLX_USER_VECT_LUT3_IDENT,
+			       pciebase + EIP197_XLX_USER_VECT_LUT3_ADDR);
+
+			/* Enable all device interrupts */
+			writel(GENMASK(31, 0),
+			       pciebase + EIP197_XLX_USER_INT_ENB_MSK);
+		} else {
+			dev_err(dev, "Unrecognised IRQ block identifier %x\n",
+				val);
+			return -ENODEV;
+		}
+
+		/* HW reset FPGA dev board */
+		/* assert reset */
+		writel(1, priv->base + EIP197_XLX_GPIO_BASE);
+		wmb(); /* maintain strict ordering for accesses here */
+		/* deassert reset */
+		writel(0, priv->base + EIP197_XLX_GPIO_BASE);
+		wmb(); /* maintain strict ordering for accesses here */
+	}
+
+	/* enable bus mastering */
+	pci_set_master(pdev);
+
+	/* Generic EIP97/EIP197 device probing */
+	rc = safexcel_probe_generic(pdev, priv, 1);
+	return rc;
 }
 
 void crypto_is_pci_remove(struct pci_dev *pdev)
 {
-	if (IS_ENABLED(CONFIG_PCI)) {
-		struct safexcel_crypto_priv *priv = pci_get_drvdata(pdev);
-		int i;
+	struct safexcel_crypto_priv *priv = pci_get_drvdata(pdev);
+	int i;
 
-		safexcel_unregister_algorithms(priv);
+	safexcel_unregister_algorithms(priv);
 
-		for (i = 0; i < priv->config.rings; i++)
-			destroy_workqueue(priv->ring[i].workqueue);
+	for (i = 0; i < priv->config.rings; i++)
+		destroy_workqueue(priv->ring[i].workqueue);
 
-		safexcel_hw_reset_rings(priv);
-	}
+	safexcel_hw_reset_rings(priv);
 }
 
 static const struct pci_device_id crypto_is_pci_ids[] = {
 	{
-		.vendor = 0x10ee,
-		.device = 0x9038,
-		.subvendor = 0x16ae,
-		.subdevice = 0xc522,
-		.class = 0x00000000,
-		.class_mask = 0x00000000,
-		// assume EIP197B for now
-		.driver_data = XILINX_PCIE | DEVICE_IS_PCI | EIP197B,
+		PCI_DEVICE_SUB(PCI_VENDOR_ID_XILINX, 0x9038,
+			       0x16ae, 0xc522),
+		/* assume EIP197B for now */
+		.driver_data = EIP197_DEVBRD,
 	},
 	{},
 };
@@ -1539,6 +1515,7 @@ static struct pci_driver crypto_is_pci_driver = {
 	.probe         = crypto_is_pci_probe,
 	.remove        = crypto_is_pci_remove,
 };
+#endif
 
 static int __init crypto_is_init(void)
 {
@@ -1571,6 +1548,5 @@ module_exit(crypto_is_exit);
 MODULE_AUTHOR("Antoine Tenart <antoine.tenart@free-electrons.com>");
 MODULE_AUTHOR("Ofer Heifetz <oferh@marvell.com>");
 MODULE_AUTHOR("Igal Liberman <igall@marvell.com>");
-MODULE_AUTHOR("Pascal van Leeuwen <pvanleeuwen@insidesecure.com>");
 MODULE_DESCRIPTION("Support for SafeXcel cryptographic engines: EIP97 & EIP197");
 MODULE_LICENSE("GPL v2");
