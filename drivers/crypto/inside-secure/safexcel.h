@@ -136,8 +136,10 @@
 #define EIP197_PE_IN_TBUF_THRES(n)		(0x0100 + (0x2000 * (n)))
 #define EIP197_PE_ICE_SCRATCH_RAM(n)		(0x0800 + (0x2000 * (n)))
 #define EIP197_PE_ICE_PUE_CTRL(n)		(0x0c80 + (0x2000 * (n)))
+#define EIP197_PE_ICE_PUTF_CTRL(n)		(0x0d00 + (0x2000 * (n)))
 #define EIP197_PE_ICE_SCRATCH_CTRL(n)		(0x0d04 + (0x2000 * (n)))
 #define EIP197_PE_ICE_FPP_CTRL(n)		(0x0d80 + (0x2000 * (n)))
+#define EIP197_PE_ICE_PPTF_CTRL(n)		(0x0e00 + (0x2000 * (n)))
 #define EIP197_PE_ICE_RAM_CTRL(n)		(0x0ff0 + (0x2000 * (n)))
 #define EIP197_PE_EIP96_TOKEN_CTRL(n)		(0x1000 + (0x2000 * (n)))
 #define EIP197_PE_EIP96_FUNCTION_EN(n)		(0x1004 + (0x2000 * (n)))
@@ -529,6 +531,10 @@ struct safexcel_command_desc {
 /*
  * Internal structures & functions
  */
+
+#define EIP197_FW_START_POLLCNT		16
+#define EIP197_FW_PUE_READY		0x14
+#define EIP197_FW_FPP_READY		0x18
 
 enum eip197_fw {
 	FW_IFPP = 0,
