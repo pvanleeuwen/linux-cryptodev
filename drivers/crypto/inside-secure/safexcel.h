@@ -19,7 +19,7 @@
 
 /* Static configuration */
 #define EIP197_DEFAULT_RING_SIZE		400
-#define EIP197_MAX_TOKENS			8
+#define EIP197_MAX_TOKENS			10
 #define EIP197_MAX_RINGS			4
 #define EIP197_FETCH_COUNT			1
 #define EIP197_MAX_BATCH_SZ			64
