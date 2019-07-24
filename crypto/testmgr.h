@@ -28,6 +28,8 @@
 #include <linux/oid_registry.h>
 
 #define MAX_IVLEN		32
+#define TESTMGR_POISON_BYTE	0xfe
+#define TESTMGR_POISON_LEN	16
 
 /*
  * hash_testvec:	structure to describe a hash (message digest) test
@@ -174,6 +176,302 @@ struct kpp_testvec {
 };
 
 static const char zeroed_string[48];
+
+/*
+ * length range declaration lo-hi plus selection threshold 0 - 1000
+ */
+struct len_range_sel {
+	unsigned int len_lo;
+	unsigned int len_hi;
+	unsigned int threshold;
+};
+
+/*
+ * List of length ranges sorted on increasing threshold
+ *
+ * 25% of each of the legal key sizes (128, 192, 256 bits)
+ * plus 25% of illegal sizes in between 0 and 1024 bits.
+ */
+static const struct len_range_sel aes_klen_template[] = {
+	{
+	.len_lo = 0,
+	.len_hi = 15,
+	.threshold = 25,
+	}, {
+	.len_lo = 16,
+	.len_hi = 16,
+	.threshold = 325,
+	}, {
+	.len_lo = 17,
+	.len_hi = 23,
+	.threshold = 350,
+	}, {
+	.len_lo = 24,
+	.len_hi = 24,
+	.threshold = 650,
+	}, {
+	.len_lo = 25,
+	.len_hi = 31,
+	.threshold = 675,
+	}, {
+	.len_lo = 32,
+	.len_hi = 32,
+	.threshold = 975,
+	}, {
+	.len_lo = 33,
+	.len_hi = 128,
+	.threshold = 1000,
+	}
+};
+
+/* 90% legal keys of size 8, rest illegal between 0 and 32 */
+static const struct len_range_sel des_klen_template[] = {
+	{
+	.len_lo = 0,
+	.len_hi = 7,
+	.threshold = 50,
+	}, {
+	.len_lo = 8,
+	.len_hi = 8,
+	.threshold = 950,
+	}, {
+	.len_lo = 9,
+	.len_hi = 32,
+	.threshold = 1000,
+	}
+};
+
+/* 90% legal keys of size 24, rest illegal between 0 and 32 */
+static const struct len_range_sel des3_klen_template[] = {
+	{
+	.len_lo = 0,
+	.len_hi = 23,
+	.threshold = 50,
+	}, {
+	.len_lo = 24,
+	.len_hi = 24,
+	.threshold = 950,
+	}, {
+	.len_lo = 25,
+	.len_hi = 32,
+	.threshold = 1000,
+	}
+};
+
+/*
+ * For HMAC's, favour the actual digest size for both key
+ * size and authenticator size, but do verify some tag
+ * truncation cases and some larger keys, including keys
+ * exceeding the block size.
+ */
+
+static const struct len_range_sel md5_klen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 15,
+	.threshold = 50,
+	}, {
+	.len_lo = 16,
+	.len_hi = 16,
+	.threshold = 950,
+	}, {
+	.len_lo = 17,
+	.len_hi = 256,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel md5_alen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 15,
+	.threshold = 100,
+	}, {
+	.len_lo = 16,
+	.len_hi = 16,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel sha1_klen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 19,
+	.threshold = 50,
+	}, {
+	.len_lo = 20,
+	.len_hi = 20,
+	.threshold = 950,
+	}, {
+	.len_lo = 21,
+	.len_hi = 256,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel sha1_alen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 19,
+	.threshold = 100,
+	}, {
+	.len_lo = 20,
+	.len_hi = 20,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel sha224_klen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 23,
+	.threshold = 50,
+	}, {
+	.len_lo = 24,
+	.len_hi = 24,
+	.threshold = 950,
+	}, {
+	.len_lo = 25,
+	.len_hi = 256,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel sha224_alen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 23,
+	.threshold = 100,
+	}, {
+	.len_lo = 24,
+	.len_hi = 24,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel sha256_klen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 31,
+	.threshold = 50,
+	}, {
+	.len_lo = 32,
+	.len_hi = 32,
+	.threshold = 950,
+	}, {
+	.len_lo = 33,
+	.len_hi = 256,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel sha256_alen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 31,
+	.threshold = 100,
+	}, {
+	.len_lo = 32,
+	.len_hi = 32,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel sha384_klen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 47,
+	.threshold = 50,
+	}, {
+	.len_lo = 48,
+	.len_hi = 48,
+	.threshold = 950,
+	}, {
+	.len_lo = 49,
+	.len_hi = 256,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel sha384_alen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 47,
+	.threshold = 100,
+	}, {
+	.len_lo = 48,
+	.len_hi = 48,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel sha512_klen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 63,
+	.threshold = 50,
+	}, {
+	.len_lo = 64,
+	.len_hi = 64,
+	.threshold = 950,
+	}, {
+	.len_lo = 65,
+	.len_hi = 256,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel sha512_alen_template[] = {
+	{
+	.len_lo = 0, /* Allow 0 here? */
+	.len_hi = 63,
+	.threshold = 100,
+	}, {
+	.len_lo = 64,
+	.len_hi = 64,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel aead_alen_template[] = {
+	{
+	.len_lo = 0,
+	.len_hi = 0,
+	.threshold = 200,
+	}, {
+	.len_lo = 1,
+	.len_hi = 32,
+	.threshold = 900,
+	}, {
+	.len_lo = 33,
+	.len_hi = (2 * PAGE_SIZE) - TESTMGR_POISON_LEN,
+	.threshold = 1000,
+	}
+};
+
+static const struct len_range_sel aead_plen_template[] = {
+	{
+	.len_lo = 0,
+	.len_hi = 0,
+	.threshold = 200,
+	}, {
+	.len_lo = 1,
+	.len_hi = 63,
+	.threshold = 400,
+	}, {
+	.len_lo = 64,
+	.len_hi = 255,
+	.threshold = 600,
+	}, {
+	.len_lo = 256,
+	.len_hi = 1023,
+	.threshold = 800,
+	}, {
+	.len_lo = 1024,
+	.len_hi = (2 * PAGE_SIZE) - TESTMGR_POISON_LEN,
+	.threshold = 1000,
+	}
+};
 
 /*
  * RSA test vectors. Borrowed from openSSL.
