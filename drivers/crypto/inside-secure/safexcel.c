@@ -1274,6 +1274,8 @@ static int safexcel_probe(struct platform_device *pdev)
 	priv->dev = dev;
 	priv->version = (enum safexcel_eip_version)of_device_get_match_data(dev);
 
+	platform_set_drvdata(pdev, priv);
+
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	priv->base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(priv->base)) {
