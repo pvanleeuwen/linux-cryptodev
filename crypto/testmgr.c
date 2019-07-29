@@ -2057,7 +2057,7 @@ static int test_aead_vec(const char *driver, int enc,
  * Returns -1 in case the list of range specs is empty.
  * (i.e. if there actually was no (legal) range specification)
  */
-int random_lensel(const struct len_range_set *lens)
+static int random_lensel(const struct len_range_set *lens)
 {
 	u32 i, sel = prandom_u32() % 1000;
 
