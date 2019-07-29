@@ -2052,7 +2052,11 @@ static int test_aead_vec(const char *driver, int enc,
 }
 
 #ifdef CONFIG_CRYPTO_MANAGER_EXTRA_TESTS
-/* Select a random length value from a list of range specs */
+/*
+ * Select a random length value from a list of range specs
+ * Returns -1 in case the list of range specs is empty.
+ * (i.e. if there actually was no (legal) range specification)
+ */
 int random_lensel(const struct len_range_set *lens)
 {
 	u32 i, sel = prandom_u32() % 1000;
