@@ -2389,7 +2389,7 @@ static int alg_test_aead(const struct alg_test_desc *desc, const char *driver,
 	}
 
 	if (suite->count <= 0) {
-		pr_err("alg: aead: empty test suite for %s\n", driver);
+		printk(KERN_INFO "alg: aead: empty test suite for %s\n", driver);
 		goto aead_skip_testsuite;
 	}
 
@@ -2909,7 +2909,7 @@ static int alg_test_skcipher(const struct alg_test_desc *desc,
 	int err;
 
 	if (suite->count <= 0) {
-		pr_err("alg: skcipher: empty test suite for %s\n", driver);
+		pr_debug("alg: skcipher: empty test suite for %s\n", driver);
 		return -EINVAL;
 	}
 
