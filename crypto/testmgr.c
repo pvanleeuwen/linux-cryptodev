@@ -94,7 +94,10 @@ struct aead_test_suite {
 	unsigned int count;
 };
 
-struct aead_test_params {
+/*
+ * Set of length and size ranges to be used for AEAD fuzz testing
+ */
+struct aead_fuzz_test_params {
 	struct len_range_set ckeylensel;
 	struct len_range_set akeylensel;
 	struct len_range_set authsizesel;
@@ -158,8 +161,8 @@ struct alg_test_desc {
 	} suite;
 
 	union {
-		struct aead_test_params aead;
-	} params;
+		struct aead_fuzz_test_params aead;
+	} fuzz_params;
 };
 
 static void hexdump(unsigned char *buf, unsigned int len)
@@ -2070,7 +2073,7 @@ static void generate_random_aead_testvec(struct aead_request *req,
 					 struct aead_testvec *vec,
 					 unsigned int maxkeysize,
 					 unsigned int maxdatasize,
-					 const struct aead_test_params *lengths,
+					 const struct aead_fuzz_test_params *lengths,
 					 char *name, size_t max_namelen)
 {
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
@@ -2269,16 +2272,16 @@ static int test_aead_vs_generic_impl(const char *driver,
 	 */
 
 	maxkeysize = 0;
-	for (i = 0; i < test_desc->params.aead.ckeylensel.count; i++)
+	for (i = 0; i < test_desc->fuzz_params.aead.ckeylensel.count; i++)
 		maxkeysize = max_t(unsigned int, maxkeysize,
-			test_desc->params.aead.ckeylensel.lensel[i].len_hi);
+			test_desc->fuzz_params.aead.ckeylensel.lensel[i].len_hi);
 
-	if (maxkeysize && test_desc->params.aead.akeylensel.count) {
+	if (maxkeysize && test_desc->fuzz_params.aead.akeylensel.count) {
 		/* authenc, explicit keylen ranges defined, use them */
 		maxakeysize = 0;
-		for (i = 0; i < test_desc->params.aead.akeylensel.count; i++)
+		for (i = 0; i < test_desc->fuzz_params.aead.akeylensel.count; i++)
 			maxakeysize = max_t(unsigned int, maxakeysize,
-			   test_desc->params.aead.akeylensel.lensel[i].len_hi);
+			   test_desc->fuzz_params.aead.akeylensel.lensel[i].len_hi);
 		maxkeysize = 8 + maxkeysize + maxakeysize;
 	} else if (!maxkeysize && test_desc->suite.aead.count) {
 		/* attempt to derive from test vectors */
@@ -2304,7 +2307,7 @@ static int test_aead_vs_generic_impl(const char *driver,
 	for (i = 0; i < fuzz_iterations * 8; i++) {
 		generate_random_aead_testvec(generic_req, &vec,
 					     maxkeysize, maxdatasize,
-					     &test_desc->params.aead,
+					     &test_desc->fuzz_params.aead,
 					     vec_name, sizeof(vec_name));
 		generate_random_testvec_config(&cfg, cfgname, sizeof(cfgname));
 
@@ -3976,7 +3979,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.suite = {
 			.aead = __VECS(hmac_sha1_aes_cbc_tv_temp)
 		},
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(aes_klen_template),
 				.akeylensel = __LENS(sha1_klen_template),
@@ -3991,7 +3994,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.suite = {
 			.aead = __VECS(hmac_sha1_des_cbc_tv_temp)
 		},
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(des_klen_template),
 				.akeylensel = __LENS(sha1_klen_template),
@@ -4007,7 +4010,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.suite = {
 			.aead = __VECS(hmac_sha1_des3_ede_cbc_tv_temp)
 		},
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(des3_klen_template),
 				.akeylensel = __LENS(sha1_klen_template),
@@ -4030,7 +4033,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.alg = "authenc(hmac(sha1),rfc3686(ctr(aes)))",
 		.test = alg_test_aead,
 		.fips_allowed = 1,
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(aes_klen_template),
 				.akeylensel = __LENS(sha1_klen_template),
@@ -4042,7 +4045,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 	}, {
 		.alg = "authenc(hmac(sha224),cbc(aes))",
 		.test = alg_test_aead,
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(aes_klen_template),
 				.akeylensel = __LENS(sha224_klen_template),
@@ -4067,7 +4070,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 	}, {
 		.alg = "authenc(hmac(sha224),rfc3686(ctr(aes)))",
 		.test = alg_test_aead,
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(aes_klen_template),
 				.akeylensel = __LENS(sha224_klen_template),
@@ -4083,7 +4086,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.suite = {
 			.aead = __VECS(hmac_sha256_aes_cbc_tv_temp)
 		},
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(aes_klen_template),
 				.akeylensel = __LENS(sha256_klen_template),
@@ -4113,7 +4116,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.alg = "authenc(hmac(sha256),rfc3686(ctr(aes)))",
 		.test = alg_test_aead,
 		.fips_allowed = 1,
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(aes_klen_template),
 				.akeylensel = __LENS(sha256_klen_template),
@@ -4125,7 +4128,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 	}, {
 		.alg = "authenc(hmac(sha384),cbc(aes))",
 		.test = alg_test_aead,
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(aes_klen_template),
 				.akeylensel = __LENS(sha384_klen_template),
@@ -4155,7 +4158,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.alg = "authenc(hmac(sha384),rfc3686(ctr(aes)))",
 		.test = alg_test_aead,
 		.fips_allowed = 1,
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(aes_klen_template),
 				.akeylensel = __LENS(sha384_klen_template),
@@ -4171,7 +4174,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.suite = {
 			.aead = __VECS(hmac_sha512_aes_cbc_tv_temp)
 		},
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(aes_klen_template),
 				.akeylensel = __LENS(sha512_klen_template),
@@ -4201,7 +4204,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.alg = "authenc(hmac(sha512),rfc3686(ctr(aes)))",
 		.test = alg_test_aead,
 		.fips_allowed = 1,
-		.params = {
+		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(aes_klen_template),
 				.akeylensel = __LENS(sha512_klen_template),
