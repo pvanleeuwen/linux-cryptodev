@@ -178,7 +178,7 @@ struct kpp_testvec {
 static const char zeroed_string[48];
 
 /*
- * length range declaration lo-hi plus selection threshold 0 - 1000
+ * length/size range declaration lo-hi plus selection threshold 0 - 1000
  */
 struct len_range_sel {
 	unsigned int len_lo;
