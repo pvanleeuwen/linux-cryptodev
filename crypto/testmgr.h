@@ -178,7 +178,7 @@ static const char zeroed_string[48];
 struct len_range_sel {
 	unsigned int len_lo;
 	unsigned int len_hi;
-	unsigned int threshold;
+	unsigned int proportion_of_total;
 };
 
 /*
@@ -194,31 +194,31 @@ static const struct len_range_sel aes_klen_template[] = {
 	{
 	.len_lo = 0,
 	.len_hi = 15,
-	.threshold = 25,
+	.proportion_of_total = 25,
 	}, {
 	.len_lo = 16,
 	.len_hi = 16,
-	.threshold = 325,
+	.proportion_of_total = 300,
 	}, {
 	.len_lo = 17,
 	.len_hi = 23,
-	.threshold = 350,
+	.proportion_of_total = 25,
 	}, {
 	.len_lo = 24,
 	.len_hi = 24,
-	.threshold = 650,
+	.proportion_of_total = 300,
 	}, {
 	.len_lo = 25,
 	.len_hi = 31,
-	.threshold = 675,
+	.proportion_of_total = 25,
 	}, {
 	.len_lo = 32,
 	.len_hi = 32,
-	.threshold = 975,
+	.proportion_of_total = 300,
 	}, {
 	.len_lo = 33,
 	.len_hi = 128,
-	.threshold = 1000,
+	.proportion_of_total = 25,
 	}
 };
 
@@ -230,15 +230,15 @@ static const struct len_range_sel des_klen_template[] = {
 	{
 	.len_lo = 0,
 	.len_hi = 7,
-	.threshold = 50,
+	.proportion_of_total = 50,
 	}, {
 	.len_lo = 8,
 	.len_hi = 8,
-	.threshold = 950,
+	.proportion_of_total = 900,
 	}, {
 	.len_lo = 9,
 	.len_hi = 32,
-	.threshold = 1000,
+	.proportion_of_total = 50,
 	}
 };
 
@@ -250,15 +250,15 @@ static const struct len_range_sel des3_klen_template[] = {
 	{
 	.len_lo = 0,
 	.len_hi = 23,
-	.threshold = 50,
+	.proportion_of_total = 50,
 	}, {
 	.len_lo = 24,
 	.len_hi = 24,
-	.threshold = 950,
+	.proportion_of_total = 900,
 	}, {
 	.len_lo = 25,
 	.len_hi = 32,
-	.threshold = 1000,
+	.proportion_of_total = 50,
 	}
 };
 
@@ -273,15 +273,15 @@ static const struct len_range_sel hmac_md5_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 15,
-	.threshold = 50,
+	.proportion_of_total = 50,
 	}, {
 	.len_lo = 16,
 	.len_hi = 16,
-	.threshold = 950,
+	.proportion_of_total = 900,
 	}, {
 	.len_lo = 17,
 	.len_hi = 256,
-	.threshold = 1000,
+	.proportion_of_total = 50,
 	}
 };
 
@@ -289,11 +289,11 @@ static const struct len_range_sel md5_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 15,
-	.threshold = 100,
+	.proportion_of_total = 100,
 	}, {
 	.len_lo = 16,
 	.len_hi = 16,
-	.threshold = 1000,
+	.proportion_of_total = 900,
 	}
 };
 
@@ -301,15 +301,15 @@ static const struct len_range_sel hmac_sha1_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 19,
-	.threshold = 50,
+	.proportion_of_total = 50,
 	}, {
 	.len_lo = 20,
 	.len_hi = 20,
-	.threshold = 950,
+	.proportion_of_total = 900,
 	}, {
 	.len_lo = 21,
 	.len_hi = 256,
-	.threshold = 1000,
+	.proportion_of_total = 50,
 	}
 };
 
@@ -317,11 +317,11 @@ static const struct len_range_sel sha1_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 19,
-	.threshold = 100,
+	.proportion_of_total = 100,
 	}, {
 	.len_lo = 20,
 	.len_hi = 20,
-	.threshold = 1000,
+	.proportion_of_total = 900,
 	}
 };
 
@@ -329,15 +329,15 @@ static const struct len_range_sel hmac_sha224_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 23,
-	.threshold = 50,
+	.proportion_of_total = 50,
 	}, {
 	.len_lo = 24,
 	.len_hi = 24,
-	.threshold = 950,
+	.proportion_of_total = 900,
 	}, {
 	.len_lo = 25,
 	.len_hi = 256,
-	.threshold = 1000,
+	.proportion_of_total = 50,
 	}
 };
 
@@ -345,11 +345,11 @@ static const struct len_range_sel sha224_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 23,
-	.threshold = 100,
+	.proportion_of_total = 100,
 	}, {
 	.len_lo = 24,
 	.len_hi = 24,
-	.threshold = 1000,
+	.proportion_of_total = 900,
 	}
 };
 
@@ -357,15 +357,15 @@ static const struct len_range_sel hmac_sha256_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 31,
-	.threshold = 50,
+	.proportion_of_total = 50,
 	}, {
 	.len_lo = 32,
 	.len_hi = 32,
-	.threshold = 950,
+	.proportion_of_total = 900,
 	}, {
 	.len_lo = 33,
 	.len_hi = 256,
-	.threshold = 1000,
+	.proportion_of_total = 50,
 	}
 };
 
@@ -373,11 +373,11 @@ static const struct len_range_sel sha256_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 31,
-	.threshold = 100,
+	.proportion_of_total = 100,
 	}, {
 	.len_lo = 32,
 	.len_hi = 32,
-	.threshold = 1000,
+	.proportion_of_total = 900,
 	}
 };
 
@@ -385,15 +385,15 @@ static const struct len_range_sel hmac_sha384_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 47,
-	.threshold = 50,
+	.proportion_of_total = 50,
 	}, {
 	.len_lo = 48,
 	.len_hi = 48,
-	.threshold = 950,
+	.proportion_of_total = 900,
 	}, {
 	.len_lo = 49,
 	.len_hi = 256,
-	.threshold = 1000,
+	.proportion_of_total = 50,
 	}
 };
 
@@ -401,11 +401,11 @@ static const struct len_range_sel sha384_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 47,
-	.threshold = 100,
+	.proportion_of_total = 100,
 	}, {
 	.len_lo = 48,
 	.len_hi = 48,
-	.threshold = 1000,
+	.proportion_of_total = 900,
 	}
 };
 
@@ -413,15 +413,15 @@ static const struct len_range_sel hmac_sha512_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 63,
-	.threshold = 50,
+	.proportion_of_total = 50,
 	}, {
 	.len_lo = 64,
 	.len_hi = 64,
-	.threshold = 950,
+	.proportion_of_total = 900,
 	}, {
 	.len_lo = 65,
 	.len_hi = 256,
-	.threshold = 1000,
+	.proportion_of_total = 50,
 	}
 };
 
@@ -429,11 +429,11 @@ static const struct len_range_sel sha512_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 63,
-	.threshold = 100,
+	.proportion_of_total = 100,
 	}, {
 	.len_lo = 64,
 	.len_hi = 64,
-	.threshold = 1000,
+	.proportion_of_total = 900,
 	}
 };
 
@@ -441,15 +441,15 @@ static const struct len_range_sel aead_alen_template[] = {
 	{
 	.len_lo = 0,
 	.len_hi = 0,
-	.threshold = 200,
+	.proportion_of_total = 200,
 	}, {
 	.len_lo = 1,
 	.len_hi = 32,
-	.threshold = 900,
+	.proportion_of_total = 700,
 	}, {
 	.len_lo = 33,
 	.len_hi = (2 * PAGE_SIZE) - TESTMGR_POISON_LEN,
-	.threshold = 1000,
+	.proportion_of_total = 100,
 	}
 };
 
@@ -457,23 +457,23 @@ static const struct len_range_sel aead_plen_template[] = {
 	{
 	.len_lo = 0,
 	.len_hi = 0,
-	.threshold = 200,
+	.proportion_of_total = 200,
 	}, {
 	.len_lo = 1,
 	.len_hi = 63,
-	.threshold = 400,
+	.proportion_of_total = 200,
 	}, {
 	.len_lo = 64,
 	.len_hi = 255,
-	.threshold = 600,
+	.proportion_of_total = 200,
 	}, {
 	.len_lo = 256,
 	.len_hi = 1023,
-	.threshold = 800,
+	.proportion_of_total = 200,
 	}, {
 	.len_lo = 1024,
 	.len_hi = (2 * PAGE_SIZE) - TESTMGR_POISON_LEN,
-	.threshold = 1000,
+	.proportion_of_total = 200,
 	}
 };
 
