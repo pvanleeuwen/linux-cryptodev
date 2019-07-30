@@ -182,8 +182,16 @@ struct len_range_sel {
 };
 
 /*
+<<<<<<< HEAD
  * List of length ranges sorted on increasing threshold
  *
+=======
+ * Lists of length ranges sorted on increasing threshold
+ */
+
+/*
+ * AES key size ranges:
+>>>>>>> c425fba... crypto: testmgr - Some silly whitespace fixes
  * 25% of each of the legal key sizes (128, 192, 256 bits)
  * plus 25% of illegal sizes in between 0 and 1024 bits.
  */
