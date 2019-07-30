@@ -187,8 +187,11 @@ struct len_range_sel {
 };
 
 /*
- * List of length ranges sorted on increasing threshold
- *
+ * Lists of length ranges sorted on increasing threshold
+ */
+
+/* 
+ * AES key size ranges:
  * 25% of each of the legal key sizes (128, 192, 256 bits)
  * plus 25% of illegal sizes in between 0 and 1024 bits.
  */
@@ -224,7 +227,10 @@ static const struct len_range_sel aes_klen_template[] = {
 	}
 };
 
-/* 90% legal keys of size 8, rest illegal between 0 and 32 */
+/*
+ * Single DES key size ranges:
+ * 90% legal keys of size 8, rest illegal between 0 and 32
+ */
 static const struct len_range_sel des_klen_template[] = {
 	{
 	.len_lo = 0,
@@ -241,7 +247,10 @@ static const struct len_range_sel des_klen_template[] = {
 	}
 };
 
-/* 90% legal keys of size 24, rest illegal between 0 and 32 */
+/*
+ * Triple DES key size ranges:
+ * 90% legal keys of size 24, rest illegal between 0 and 32
+ */
 static const struct len_range_sel des3_klen_template[] = {
 	{
 	.len_lo = 0,
