@@ -12,6 +12,7 @@
 #include <crypto/aead.h>
 #include <crypto/aes.h>
 #include <crypto/authenc.h>
+#include <crypto/ctr.h>
 #include <crypto/des.h>
 #include <crypto/sha.h>
 #include <crypto/skcipher.h>
@@ -237,19 +238,21 @@ static int safexcel_aead_setkey(struct crypto_aead *ctfm, const u8 *key,
 		goto badkey;
 
 	if (ctx->mode == CONTEXT_CONTROL_CRYPTO_MODE_CTR_LOAD) {
-		/* 20 is minimum AES key: 16 bytes + 4 bytes nonce */
-		if (keys.enckeylen < 20)
+		/* Minimum keysize is minimum AES key size + nonce size */
+		if (keys.enckeylen < (AES_MIN_KEY_SIZE +
+				      CTR_RFC3686_NONCE_SIZE))
 			goto badkey;
 		/* last 4 bytes of key are the nonce! */
-		ctx->nonce = *(u32 *)(keys.enckey + keys.enckeylen - 4);
+		ctx->nonce = *(u32 *)(keys.enckey + keys.enckeylen -
+				      CTR_RFC3686_NONCE_SIZE);
 		/* exclude the nonce here */
-		keys.enckeylen -= 4;
+		keys.enckeylen -= CONTEXT_CONTROL_CRYPTO_MODE_CTR_LOAD;
 	}
 
 	/* Encryption key */
 	switch (ctx->alg) {
 	case SAFEXCEL_3DES:
-		if (keys.enckeylen != 24)
+		if (keys.enckeylen != DES3_EDE_KEY_SIZE)
 			goto badkey;
 		flags = crypto_aead_get_flags(ctfm);
 		err = __des3_verify_key(&flags, keys.enckey);
@@ -1114,9 +1117,9 @@ static int safexcel_skcipher_aesctr_setkey(struct crypto_skcipher *ctfm,
 	unsigned int keylen;
 
 	/* last 4 bytes of key are the nonce! */
-	ctx->nonce = *(u32 *)(key + len - 4);
+	ctx->nonce = *(u32 *)(key + len - CTR_RFC3686_NONCE_SIZE);
 	/* exclude the nonce here */
-	keylen = len - 4;
+	keylen = len - CTR_RFC3686_NONCE_SIZE;
 	ret = crypto_aes_expand_key(&aes, key, keylen);
 	if (ret) {
 		crypto_skcipher_set_flags(ctfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
@@ -1157,10 +1160,10 @@ struct safexcel_alg_template safexcel_alg_ctr_aes = {
 		.setkey = safexcel_skcipher_aesctr_setkey,
 		.encrypt = safexcel_encrypt,
 		.decrypt = safexcel_decrypt,
-		/* Add 4 to include the 4 byte nonce! */
-		.min_keysize = AES_MIN_KEY_SIZE + 4,
-		.max_keysize = AES_MAX_KEY_SIZE + 4,
-		.ivsize = 8,
+		/* Add nonce size */
+		.min_keysize = AES_MIN_KEY_SIZE + CTR_RFC3686_NONCE_SIZE,
+		.max_keysize = AES_MAX_KEY_SIZE + CTR_RFC3686_NONCE_SIZE,
+		.ivsize = CTR_RFC3686_IV_SIZE,
 		.base = {
 			.cra_name = "rfc3686(ctr(aes))",
 			.cra_driver_name = "safexcel-ctr-aes",
@@ -1620,7 +1623,7 @@ struct safexcel_alg_template safexcel_alg_authenc_hmac_sha1_ctr_aes = {
 		.setkey = safexcel_aead_setkey,
 		.encrypt = safexcel_aead_encrypt,
 		.decrypt = safexcel_aead_decrypt,
-		.ivsize = 8,
+		.ivsize = CTR_RFC3686_IV_SIZE,
 		.maxauthsize = SHA1_DIGEST_SIZE,
 		.base = {
 			.cra_name = "authenc(hmac(sha1),rfc3686(ctr(aes)))",
@@ -1653,7 +1656,7 @@ struct safexcel_alg_template safexcel_alg_authenc_hmac_sha256_ctr_aes = {
 		.setkey = safexcel_aead_setkey,
 		.encrypt = safexcel_aead_encrypt,
 		.decrypt = safexcel_aead_decrypt,
-		.ivsize = 8,
+		.ivsize = CTR_RFC3686_IV_SIZE,
 		.maxauthsize = SHA256_DIGEST_SIZE,
 		.base = {
 			.cra_name = "authenc(hmac(sha256),rfc3686(ctr(aes)))",
@@ -1686,7 +1689,7 @@ struct safexcel_alg_template safexcel_alg_authenc_hmac_sha224_ctr_aes = {
 		.setkey = safexcel_aead_setkey,
 		.encrypt = safexcel_aead_encrypt,
 		.decrypt = safexcel_aead_decrypt,
-		.ivsize = 8,
+		.ivsize = CTR_RFC3686_IV_SIZE,
 		.maxauthsize = SHA224_DIGEST_SIZE,
 		.base = {
 			.cra_name = "authenc(hmac(sha224),rfc3686(ctr(aes)))",
@@ -1719,7 +1722,7 @@ struct safexcel_alg_template safexcel_alg_authenc_hmac_sha512_ctr_aes = {
 		.setkey = safexcel_aead_setkey,
 		.encrypt = safexcel_aead_encrypt,
 		.decrypt = safexcel_aead_decrypt,
-		.ivsize = 8,
+		.ivsize = CTR_RFC3686_IV_SIZE,
 		.maxauthsize = SHA512_DIGEST_SIZE,
 		.base = {
 			.cra_name = "authenc(hmac(sha512),rfc3686(ctr(aes)))",
@@ -1752,7 +1755,7 @@ struct safexcel_alg_template safexcel_alg_authenc_hmac_sha384_ctr_aes = {
 		.setkey = safexcel_aead_setkey,
 		.encrypt = safexcel_aead_encrypt,
 		.decrypt = safexcel_aead_decrypt,
-		.ivsize = 8,
+		.ivsize = CTR_RFC3686_IV_SIZE,
 		.maxauthsize = SHA384_DIGEST_SIZE,
 		.base = {
 			.cra_name = "authenc(hmac(sha384),rfc3686(ctr(aes)))",
