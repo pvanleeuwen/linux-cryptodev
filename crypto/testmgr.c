@@ -791,10 +791,11 @@ static int random_lensel(const struct len_range_set *lens)
 	u32 i, sel = prandom_u32() % 1000;
 
 	for (i = 0; i < lens->count; i++)
-		if (sel < lens->lensel[i].threshold)
+		if (sel < lens->lensel[i].proportion_of_total)
 			return (prandom_u32() % (lens->lensel[i].len_hi  -
 						 lens->lensel[i].len_lo + 1)) +
 				lens->lensel[i].len_lo;
+		sel -= lens->lensel[i].proportion_of_total;
 	return -1;
 }
 
