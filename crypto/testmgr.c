@@ -2161,11 +2161,13 @@ static void generate_random_aead_testvec(struct aead_request *req,
 	/* IV */
 	generate_random_bytes((u8 *)vec->iv, ivsize);
 
+	/* Authentication tag size */
 	authsize = random_lensel(&lengths->authsizesel);
 	if (authsize < 0) {
 		/*
-		 * Tag length: in [0, maxauthsize],
-		 * but usually choose maxauthsize
+		 * No length hints for this algorithm specified, fall back to
+		 * a random value in the range  [0, maxauthsize], but usually
+		 * choose maxauthsize
 		 */
 		authsize = maxauthsize;
 		if (prandom_u32() % 4 == 0)
