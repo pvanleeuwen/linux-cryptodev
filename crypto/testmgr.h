@@ -265,7 +265,7 @@ static const struct len_range_sel des3_klen_template[] = {
  * exceeding the block size.
  */
 
-static const struct len_range_sel md5_klen_template[] = {
+static const struct len_range_sel hmac_md5_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 15,
@@ -281,7 +281,7 @@ static const struct len_range_sel md5_klen_template[] = {
 	}
 };
 
-static const struct len_range_sel md5_alen_template[] = {
+static const struct len_range_sel md5_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 15,
@@ -293,7 +293,7 @@ static const struct len_range_sel md5_alen_template[] = {
 	}
 };
 
-static const struct len_range_sel sha1_klen_template[] = {
+static const struct len_range_sel hmac_sha1_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 19,
@@ -309,7 +309,7 @@ static const struct len_range_sel sha1_klen_template[] = {
 	}
 };
 
-static const struct len_range_sel sha1_alen_template[] = {
+static const struct len_range_sel sha1_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 19,
@@ -321,7 +321,7 @@ static const struct len_range_sel sha1_alen_template[] = {
 	}
 };
 
-static const struct len_range_sel sha224_klen_template[] = {
+static const struct len_range_sel hmac_sha224_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 23,
@@ -337,7 +337,7 @@ static const struct len_range_sel sha224_klen_template[] = {
 	}
 };
 
-static const struct len_range_sel sha224_alen_template[] = {
+static const struct len_range_sel sha224_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 23,
@@ -349,7 +349,7 @@ static const struct len_range_sel sha224_alen_template[] = {
 	}
 };
 
-static const struct len_range_sel sha256_klen_template[] = {
+static const struct len_range_sel hmac_sha256_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 31,
@@ -365,7 +365,7 @@ static const struct len_range_sel sha256_klen_template[] = {
 	}
 };
 
-static const struct len_range_sel sha256_alen_template[] = {
+static const struct len_range_sel sha256_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 31,
@@ -377,7 +377,7 @@ static const struct len_range_sel sha256_alen_template[] = {
 	}
 };
 
-static const struct len_range_sel sha384_klen_template[] = {
+static const struct len_range_sel hmac_sha384_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 47,
@@ -393,7 +393,7 @@ static const struct len_range_sel sha384_klen_template[] = {
 	}
 };
 
-static const struct len_range_sel sha384_alen_template[] = {
+static const struct len_range_sel sha384_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 47,
@@ -405,7 +405,7 @@ static const struct len_range_sel sha384_alen_template[] = {
 	}
 };
 
-static const struct len_range_sel sha512_klen_template[] = {
+static const struct len_range_sel hmac_sha512_klen_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 63,
@@ -421,7 +421,7 @@ static const struct len_range_sel sha512_klen_template[] = {
 	}
 };
 
-static const struct len_range_sel sha512_alen_template[] = {
+static const struct len_range_sel sha512_authsize_template[] = {
 	{
 	.len_lo = 0, /* Allow 0 here? */
 	.len_hi = 63,
