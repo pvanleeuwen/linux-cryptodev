@@ -1847,7 +1847,7 @@ struct safexcel_alg_template safexcel_alg_xts_aes = {
 		.setkey = safexcel_skcipher_aesxts_setkey,
 		.encrypt = safexcel_encrypt,
 		.decrypt = safexcel_decrypt,
-		/* Add 4 to include the 4 byte nonce! */
+		/* XTS actually uses 2 AES keys glued together */
 		.min_keysize = AES_MIN_KEY_SIZE * 2,
 		.max_keysize = AES_MAX_KEY_SIZE * 2,
 		.ivsize = 16,
