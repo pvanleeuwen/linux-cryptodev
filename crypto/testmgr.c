@@ -2069,6 +2069,58 @@ static int test_aead_vec(const char *driver, int enc,
 }
 
 #ifdef CONFIG_CRYPTO_MANAGER_EXTRA_TESTS
+static void generate_random_aead_key(struct aead_testvec *vec,
+				     unsigned int maxkeysize,
+				     const struct aead_fuzz_test_params *lengths)
+{
+	int cklen, aklen;
+
+	aklen = random_lensel(&lengths->akeylensel);
+	cklen = random_lensel(&lengths->ckeylensel);
+	if ((aklen >= 0) && (cklen >= 0)) {
+		/*
+		 * Authenc key consisting of both a cipher and an
+		 * authentication key combined in a single formatted
+		 * binary blob.
+		 */
+
+		/* Correct blob header. TBD: allow corrupting it */
+#ifdef __LITTLE_ENDIAN
+		memcpy((void *)vec->key, "\x08\x00\x01\x00\x00\x00\x00\x10", 8);
+#else
+		memcpy((void *)vec->key, "\x00\x08\x00\x01\x00\x00\x00\x10", 8);
+#endif
+
+		/* Generate keys based on length templates */
+		generate_random_bytes((u8 *)(vec->key + 8), aklen);
+		generate_random_bytes((u8 *)(vec->key + 8 + aklen),
+				      cklen);
+
+		vec->klen = 8 + aklen + cklen;
+	} else {
+		/*
+		 * Single binary combined cipher & auth key
+		 */
+
+		if (cklen >= 0) {
+			/* Take length from range spec */
+			vec->klen = cklen;
+		} else {
+			/* No range specified: use between 0 and max */
+			vec->klen = maxkeysize;
+
+			/*
+		 	* Key: length in [0, maxkeysize],
+		 	* but usually choose maxkeysize
+		 	*/
+			if (prandom_u32() % 4 == 0)
+				vec->klen = prandom_u32() % (maxkeysize + 1);
+		}
+
+		generate_random_bytes((u8 *)vec->key, vec->klen);
+	}
+}
+
 /*
  * Generate an AEAD test vector from the given implementation.
  * Assumes the buffers in 'vec' were already allocated.
@@ -2090,36 +2142,8 @@ static void generate_random_aead_testvec(struct aead_request *req,
 	u8 iv[MAX_IVLEN];
 	DECLARE_CRYPTO_WAIT(wait);
 
-	alen = random_lensel(&lengths->akeylensel);
-	clen = random_lensel(&lengths->ckeylensel);
-	if ((alen >= 0) && (clen >= 0)) {
-		/* Corect blob header. TBD: Do we care about corrupting this? */
-#ifdef __LITTLE_ENDIAN
-		memcpy((void *)vec->key, "\x08\x00\x01\x00\x00\x00\x00\x10", 8);
-#else
-		memcpy((void *)vec->key, "\x00\x08\x00\x01\x00\x00\x00\x10", 8);
-#endif
-
-		/* Generate keys based on length templates */
-		generate_random_bytes((u8 *)(vec->key + 8), alen);
-		generate_random_bytes((u8 *)(vec->key + 8 + alen),
-				      clen);
-
-		vec->klen = 8 + alen + clen;
-	} else {
-		if (clen >= 0)
-			maxkeysize = clen;
-
-		vec->klen = maxkeysize;
-
-		/*
-		 * Key: length in [0, maxkeysize],
-		 * but usually choose maxkeysize
-		 */
-		if (prandom_u32() % 4 == 0)
-			vec->klen = prandom_u32() % (maxkeysize + 1);
-		generate_random_bytes((u8 *)vec->key, vec->klen);
-	}
+	/* Key */
+	generate_random_aead_key(vec, maxkeysize, lengths);
 	vec->setkey_error = crypto_aead_setkey(tfm, vec->key, vec->klen);
 
 	/* IV */
