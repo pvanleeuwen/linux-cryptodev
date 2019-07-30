@@ -2214,6 +2214,40 @@ done:
 }
 
 /*
+ * Determine maximum keysize by scanning length ranges and
+ * testvector. Returns 0 if unable to determine.
+ */
+static unsigned int find_aead_max_keysize(const struct alg_test_desc *test_desc) {
+	unsigned int i, maxkeysize, maxakeysize;
+
+	/*
+	 * Now generate test vectors using the generic implementation, and test
+	 * the other implementation against them.
+	 */
+
+	maxkeysize = 0;
+	for (i = 0; i < test_desc->fuzz_params.aead.ckeylensel.count; i++)
+		maxkeysize = max_t(unsigned int, maxkeysize,
+			test_desc->fuzz_params.aead.ckeylensel.lensel[i].len_hi);
+
+	if (maxkeysize && test_desc->fuzz_params.aead.akeylensel.count) {
+		/* authenc, explicit keylen ranges defined, use them */
+		maxakeysize = 0;
+		for (i = 0; i < test_desc->fuzz_params.aead.akeylensel.count; i++)
+			maxakeysize = max_t(unsigned int, maxakeysize,
+			   test_desc->fuzz_params.aead.akeylensel.lensel[i].len_hi);
+		maxkeysize = 8 + maxkeysize + maxakeysize;
+	} else if (!maxkeysize && test_desc->suite.aead.count) {
+		/* attempt to derive from test vectors */
+		for (i = 0; i < test_desc->suite.aead.count; i++)
+			maxkeysize = max_t(unsigned int, maxkeysize,
+					test_desc->suite.aead.vecs[i].klen);
+	}
+
+	return maxkeysize;
+}
+
+/*
  * Test the AEAD algorithm represented by @req against the corresponding generic
  * implementation, if one is available.
  */
@@ -2232,7 +2266,7 @@ static int test_aead_vs_generic_impl(const char *driver,
 	char _generic_driver[CRYPTO_MAX_ALG_NAME];
 	struct crypto_aead *generic_tfm = NULL;
 	struct aead_request *generic_req = NULL;
-	unsigned int maxkeysize, maxakeysize;
+	unsigned int maxkeysize;
 	unsigned int i;
 	struct aead_testvec vec = { 0 };
 	char vec_name[64];
@@ -2296,29 +2330,9 @@ static int test_aead_vs_generic_impl(const char *driver,
 		goto out;
 	}
 
-	/*
-	 * Now generate test vectors using the generic implementation, and test
-	 * the other implementation against them.
-	 */
-
-	maxkeysize = 0;
-	for (i = 0; i < test_desc->fuzz_params.aead.ckeylensel.count; i++)
-		maxkeysize = max_t(unsigned int, maxkeysize,
-			test_desc->fuzz_params.aead.ckeylensel.lensel[i].len_hi);
-
-	if (maxkeysize && test_desc->fuzz_params.aead.akeylensel.count) {
-		/* authenc, explicit keylen ranges defined, use them */
-		maxakeysize = 0;
-		for (i = 0; i < test_desc->fuzz_params.aead.akeylensel.count; i++)
-			maxakeysize = max_t(unsigned int, maxakeysize,
-			   test_desc->fuzz_params.aead.akeylensel.lensel[i].len_hi);
-		maxkeysize = 8 + maxkeysize + maxakeysize;
-	} else if (!maxkeysize && test_desc->suite.aead.count) {
-		/* attempt to derive from test vectors */
-		for (i = 0; i < test_desc->suite.aead.count; i++)
-			maxkeysize = max_t(unsigned int, maxkeysize,
-					test_desc->suite.aead.vecs[i].klen);
-	} else {
+	/* Determine the maximum keysize for this algorithm */
+	maxkeysize = find_aead_max_keysize(test_desc);
+	if (!maxkeysize) {
 		pr_err("alg: aead: no key length templates or test vectors for %s - unable to fuzz\n",
 		       driver);
 		err = -EINVAL;
