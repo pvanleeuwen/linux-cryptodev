@@ -2111,9 +2111,9 @@ static void generate_random_aead_key(struct aead_testvec *vec,
 			vec->klen = maxkeysize;
 
 			/*
-		 	* Key: length in [0, maxkeysize],
-		 	* but usually choose maxkeysize
-		 	*/
+			 * Key: length in [0, maxkeysize],
+			 * but usually choose maxkeysize
+			 */
 			if (prandom_u32() % 4 == 0)
 				vec->klen = prandom_u32() % (maxkeysize + 1);
 		}
@@ -2218,7 +2218,8 @@ done:
  * Determine maximum keysize by scanning length ranges and
  * testvector. Returns 0 if unable to determine.
  */
-static unsigned int find_aead_max_keysize(const struct alg_test_desc *test_desc) {
+static unsigned int find_aead_max_keysize(const struct alg_test_desc *test_desc)
+{
 	unsigned int i, maxkeysize, maxakeysize;
 
 	/*
