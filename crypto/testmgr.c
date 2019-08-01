@@ -785,16 +785,28 @@ static unsigned int generate_random_length(unsigned int max_len)
  * Select a random length value from a list of range specs
  * Returns -1 in case the list of range specs is empty.
  * (i.e. if there actually was no (legal) range specification)
+ * Align can optionally be used to force the majority of results
+ * to be an integer multiple of some legal block size, if this
+ * is not needed then just set it to 1. Align must be != 0!
  */
-static int random_lensel(const struct len_range_set *lens)
+static int random_lensel(const struct len_range_set *lens, unsigned int align)
 {
 	u32 i, sel = prandom_u32() % 1000;
 
+	/*
+	 * When aligning legal results, borrow some probability to generate
+	 * some lengths with illegal alignment as well. We do this by actually
+	 * disabling the alignment 10% of the time.
+	 */
+	if ((align != 1) && (!(prandom_u32() % 10)))
+		align = 1;
+
 	for (i = 0; i < lens->count; i++)
 		if (sel < lens->lensel[i].proportion_of_total)
-			return (prandom_u32() % (lens->lensel[i].len_hi  -
+			return (((prandom_u32() % (lens->lensel[i].len_hi  -
 						 lens->lensel[i].len_lo + 1)) +
-				lens->lensel[i].len_lo;
+				lens->lensel[i].len_lo + align - 1) / align) *
+				align;
 		sel -= lens->lensel[i].proportion_of_total;
 	return -1;
 }
@@ -2076,8 +2088,8 @@ static void generate_random_aead_key(struct aead_testvec *vec,
 {
 	int cklen, aklen;
 
-	aklen = random_lensel(&lengths->akeylensel);
-	cklen = random_lensel(&lengths->ckeylensel);
+	aklen = random_lensel(&lengths->akeylensel, 1);
+	cklen = random_lensel(&lengths->ckeylensel, 1);
 	if ((aklen >= 0) && (cklen >= 0)) {
 		/*
 		 * Authenc key consisting of both a cipher and an
@@ -2130,6 +2142,7 @@ static void generate_random_aead_testvec(struct aead_request *req,
 					 struct aead_testvec *vec,
 					 unsigned int maxkeysize,
 					 unsigned int maxdatasize,
+					 unsigned int blocksize,
 					 const struct aead_fuzz_test_params *lengths,
 					 char *name, size_t max_namelen)
 {
@@ -2151,7 +2164,7 @@ static void generate_random_aead_testvec(struct aead_request *req,
 	generate_random_bytes((u8 *)vec->iv, ivsize);
 
 	/* Authentication tag size */
-	authsize = random_lensel(&lengths->authsizesel);
+	authsize = random_lensel(&lengths->authsizesel, 1);
 	if (authsize < 0) {
 		/*
 		 * No length hints for this algorithm specified, fall back to
@@ -2167,8 +2180,8 @@ static void generate_random_aead_testvec(struct aead_request *req,
 	vec->setauthsize_error = crypto_aead_setauthsize(tfm, authsize);
 
 	/* Plaintext and associated data */
-	alen = random_lensel(&lengths->aadlensel);
-	clen = random_lensel(&lengths->ptxtlensel);
+	alen = random_lensel(&lengths->aadlensel, 1);
+	clen = random_lensel(&lengths->ptxtlensel, blocksize);
 	maxdatasize -= authsize;
 	if ((alen < 0) || (clen < 0) || ((alen + clen) > maxdatasize)) {
 		total_len = generate_random_length(maxdatasize);
@@ -2353,6 +2366,7 @@ static int test_aead_vs_generic_impl(const char *driver,
 	for (i = 0; i < fuzz_iterations * 8; i++) {
 		generate_random_aead_testvec(generic_req, &vec,
 					     maxkeysize, maxdatasize,
+					     blocksize,
 					     &test_desc->fuzz_params.aead,
 					     vec_name, sizeof(vec_name));
 		generate_random_testvec_config(&cfg, cfgname, sizeof(cfgname));
