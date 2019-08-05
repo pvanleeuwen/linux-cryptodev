@@ -15,6 +15,7 @@
 #include <crypto/ctr.h>
 #include <crypto/des.h>
 #include <crypto/sha.h>
+#include <crypto/xts.h>
 #include <crypto/skcipher.h>
 #include <crypto/internal/aead.h>
 #include <crypto/internal/skcipher.h>
@@ -1796,8 +1797,13 @@ static int safexcel_skcipher_aesxts_setkey(struct crypto_skcipher *ctfm,
 	int ret, i;
 	unsigned int keylen;
 
+	/* Check for illegal XTS keys */
+	ret = xts_verify_key(ctfm, key, len);
+	if (ret)
+		return ret;
+
 	/* Only half of the key data is cipher key */
-	keylen = (len >> 1) + (len & 1);
+	keylen = (len >> 1);
 	ret = crypto_aes_expand_key(&aes, key, keylen);
 	if (ret) {
 		crypto_skcipher_set_flags(ctfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
@@ -1854,17 +1860,35 @@ static int safexcel_skcipher_aes_xts_cra_init(struct crypto_tfm *tfm)
 	return 0;
 }
 
+static int safexcel_encrypt_xts(struct skcipher_request *req)
+{
+	if (req->cryptlen < XTS_BLOCK_SIZE)
+		return -EINVAL;
+
+	return safexcel_queue_req(&req->base, skcipher_request_ctx(req),
+			SAFEXCEL_ENCRYPT);
+}
+
+static int safexcel_decrypt_xts(struct skcipher_request *req)
+{
+	if (req->cryptlen < XTS_BLOCK_SIZE)
+		return -EINVAL;
+
+	return safexcel_queue_req(&req->base, skcipher_request_ctx(req),
+			SAFEXCEL_DECRYPT);
+}
+
 struct safexcel_alg_template safexcel_alg_xts_aes = {
 	.type = SAFEXCEL_ALG_TYPE_SKCIPHER,
 	.algo_mask = SAFEXCEL_ALG_AES | SAFEXCEL_ALG_AES_XTS,
 	.alg.skcipher = {
 		.setkey = safexcel_skcipher_aesxts_setkey,
-		.encrypt = safexcel_encrypt,
-		.decrypt = safexcel_decrypt,
+		.encrypt = safexcel_encrypt_xts,
+		.decrypt = safexcel_decrypt_xts,
 		/* XTS actually uses 2 AES keys glued together */
 		.min_keysize = AES_MIN_KEY_SIZE * 2,
 		.max_keysize = AES_MAX_KEY_SIZE * 2,
-		.ivsize = 16,
+		.ivsize = XTS_BLOCK_SIZE,
 		.base = {
 			.cra_name = "xts(aes)",
 			.cra_driver_name = "safexcel-xts-aes",
