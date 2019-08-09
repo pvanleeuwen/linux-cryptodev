@@ -124,6 +124,16 @@ badkey:
 	goto out;
 }
 
+static int crypto_authenc_setauthsize(struct crypto_aead *tfm,
+				      unsigned int authsize)
+{
+	/* Do not allow authsize of 0 */
+	if (!authsize)
+		return -EINVAL;
+
+	return 0;
+}
+
 static void authenc_geniv_ahash_done(struct crypto_async_request *areq, int err)
 {
 	struct aead_request *req = areq->data;
@@ -469,6 +479,9 @@ static int crypto_authenc_create(struct crypto_template *tmpl,
 	inst->alg.exit = crypto_authenc_exit_tfm;
 
 	inst->alg.setkey = crypto_authenc_setkey;
+	/* Do not allow 0 if the auth algorithm has a non-zero digestsize */
+	if (auth->digestsize)
+		inst->alg.setauthsize = crypto_authenc_setauthsize;
 	inst->alg.encrypt = crypto_authenc_encrypt;
 	inst->alg.decrypt = crypto_authenc_decrypt;
 
