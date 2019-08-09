@@ -1895,7 +1895,7 @@ struct safexcel_alg_template safexcel_alg_xts_aes = {
 			.cra_priority = SAFEXCEL_CRA_PRIORITY,
 			.cra_flags = CRYPTO_ALG_ASYNC |
 				     CRYPTO_ALG_KERN_DRIVER_ONLY,
-			.cra_blocksize = XTS_BLOCK_SIZE,
+			.cra_blocksize = 1,
 			.cra_ctxsize = sizeof(struct safexcel_cipher_ctx),
 			.cra_alignmask = 0,
 			.cra_init = safexcel_skcipher_aes_xts_cra_init,
