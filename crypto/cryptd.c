@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Software async crypto daemon.
  *
@@ -9,19 +10,13 @@
  *             Gabriele Paoloni <gabriele.paoloni@intel.com>
  *             Aidan O'Mahony (aidan.o.mahony@intel.com)
  *    Copyright (c) 2010, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
  */
 
 #include <crypto/internal/hash.h>
 #include <crypto/internal/aead.h>
 #include <crypto/internal/skcipher.h>
 #include <crypto/cryptd.h>
-#include <linux/atomic.h>
+#include <linux/refcount.h>
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -68,7 +63,7 @@ struct aead_instance_ctx {
 };
 
 struct cryptd_skcipher_ctx {
-	atomic_t refcnt;
+	refcount_t refcnt;
 	struct crypto_sync_skcipher *child;
 };
 
@@ -77,7 +72,7 @@ struct cryptd_skcipher_request_ctx {
 };
 
 struct cryptd_hash_ctx {
-	atomic_t refcnt;
+	refcount_t refcnt;
 	struct crypto_shash *child;
 };
 
@@ -87,7 +82,7 @@ struct cryptd_hash_request_ctx {
 };
 
 struct cryptd_aead_ctx {
-	atomic_t refcnt;
+	refcount_t refcnt;
 	struct crypto_aead *child;
 };
 
@@ -132,7 +127,7 @@ static int cryptd_enqueue_request(struct cryptd_queue *queue,
 {
 	int cpu, err;
 	struct cryptd_cpu_queue *cpu_queue;
-	atomic_t *refcnt;
+	refcount_t *refcnt;
 
 	cpu = get_cpu();
 	cpu_queue = this_cpu_ptr(queue->cpu_queue);
@@ -145,10 +140,10 @@ static int cryptd_enqueue_request(struct cryptd_queue *queue,
 
 	queue_work_on(cpu, cryptd_wq, &cpu_queue->work);
 
-	if (!atomic_read(refcnt))
+	if (!refcount_read(refcnt))
 		goto out_put_cpu;
 
-	atomic_inc(refcnt);
+	refcount_inc(refcnt);
 
 out_put_cpu:
 	put_cpu();
@@ -275,13 +270,13 @@ static void cryptd_skcipher_complete(struct skcipher_request *req, int err)
 	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
 	struct cryptd_skcipher_ctx *ctx = crypto_skcipher_ctx(tfm);
 	struct cryptd_skcipher_request_ctx *rctx = skcipher_request_ctx(req);
-	int refcnt = atomic_read(&ctx->refcnt);
+	int refcnt = refcount_read(&ctx->refcnt);
 
 	local_bh_disable();
 	rctx->complete(&req->base, err);
 	local_bh_enable();
 
-	if (err != -EINPROGRESS && refcnt && atomic_dec_and_test(&ctx->refcnt))
+	if (err != -EINPROGRESS && refcnt && refcount_dec_and_test(&ctx->refcnt))
 		crypto_free_skcipher(tfm);
 }
 
@@ -395,6 +390,7 @@ static void cryptd_skcipher_free(struct skcipher_instance *inst)
 	struct skcipherd_instance_ctx *ctx = skcipher_instance_ctx(inst);
 
 	crypto_drop_skcipher(&ctx->spawn);
+	kfree(inst);
 }
 
 static int cryptd_create_skcipher(struct crypto_template *tmpl,
@@ -525,13 +521,13 @@ static void cryptd_hash_complete(struct ahash_request *req, int err)
 	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
 	struct cryptd_hash_ctx *ctx = crypto_ahash_ctx(tfm);
 	struct cryptd_hash_request_ctx *rctx = ahash_request_ctx(req);
-	int refcnt = atomic_read(&ctx->refcnt);
+	int refcnt = refcount_read(&ctx->refcnt);
 
 	local_bh_disable();
 	rctx->complete(&req->base, err);
 	local_bh_enable();
 
-	if (err != -EINPROGRESS && refcnt && atomic_dec_and_test(&ctx->refcnt))
+	if (err != -EINPROGRESS && refcnt && refcount_dec_and_test(&ctx->refcnt))
 		crypto_free_ahash(tfm);
 }
 
@@ -776,13 +772,13 @@ static void cryptd_aead_crypt(struct aead_request *req,
 
 out:
 	ctx = crypto_aead_ctx(tfm);
-	refcnt = atomic_read(&ctx->refcnt);
+	refcnt = refcount_read(&ctx->refcnt);
 
 	local_bh_disable();
 	compl(&req->base, err);
 	local_bh_enable();
 
-	if (err != -EINPROGRESS && refcnt && atomic_dec_and_test(&ctx->refcnt))
+	if (err != -EINPROGRESS && refcnt && refcount_dec_and_test(&ctx->refcnt))
 		crypto_free_aead(tfm);
 }
 
@@ -983,7 +979,7 @@ struct cryptd_skcipher *cryptd_alloc_skcipher(const char *alg_name,
 	}
 
 	ctx = crypto_skcipher_ctx(tfm);
-	atomic_set(&ctx->refcnt, 1);
+	refcount_set(&ctx->refcnt, 1);
 
 	return container_of(tfm, struct cryptd_skcipher, base);
 }
@@ -1001,7 +997,7 @@ bool cryptd_skcipher_queued(struct cryptd_skcipher *tfm)
 {
 	struct cryptd_skcipher_ctx *ctx = crypto_skcipher_ctx(&tfm->base);
 
-	return atomic_read(&ctx->refcnt) - 1;
+	return refcount_read(&ctx->refcnt) - 1;
 }
 EXPORT_SYMBOL_GPL(cryptd_skcipher_queued);
 
@@ -1009,7 +1005,7 @@ void cryptd_free_skcipher(struct cryptd_skcipher *tfm)
 {
 	struct cryptd_skcipher_ctx *ctx = crypto_skcipher_ctx(&tfm->base);
 
-	if (atomic_dec_and_test(&ctx->refcnt))
+	if (refcount_dec_and_test(&ctx->refcnt))
 		crypto_free_skcipher(&tfm->base);
 }
 EXPORT_SYMBOL_GPL(cryptd_free_skcipher);
@@ -1033,7 +1029,7 @@ struct cryptd_ahash *cryptd_alloc_ahash(const char *alg_name,
 	}
 
 	ctx = crypto_ahash_ctx(tfm);
-	atomic_set(&ctx->refcnt, 1);
+	refcount_set(&ctx->refcnt, 1);
 
 	return __cryptd_ahash_cast(tfm);
 }
@@ -1058,7 +1054,7 @@ bool cryptd_ahash_queued(struct cryptd_ahash *tfm)
 {
 	struct cryptd_hash_ctx *ctx = crypto_ahash_ctx(&tfm->base);
 
-	return atomic_read(&ctx->refcnt) - 1;
+	return refcount_read(&ctx->refcnt) - 1;
 }
 EXPORT_SYMBOL_GPL(cryptd_ahash_queued);
 
@@ -1066,7 +1062,7 @@ void cryptd_free_ahash(struct cryptd_ahash *tfm)
 {
 	struct cryptd_hash_ctx *ctx = crypto_ahash_ctx(&tfm->base);
 
-	if (atomic_dec_and_test(&ctx->refcnt))
+	if (refcount_dec_and_test(&ctx->refcnt))
 		crypto_free_ahash(&tfm->base);
 }
 EXPORT_SYMBOL_GPL(cryptd_free_ahash);
@@ -1090,7 +1086,7 @@ struct cryptd_aead *cryptd_alloc_aead(const char *alg_name,
 	}
 
 	ctx = crypto_aead_ctx(tfm);
-	atomic_set(&ctx->refcnt, 1);
+	refcount_set(&ctx->refcnt, 1);
 
 	return __cryptd_aead_cast(tfm);
 }
@@ -1108,7 +1104,7 @@ bool cryptd_aead_queued(struct cryptd_aead *tfm)
 {
 	struct cryptd_aead_ctx *ctx = crypto_aead_ctx(&tfm->base);
 
-	return atomic_read(&ctx->refcnt) - 1;
+	return refcount_read(&ctx->refcnt) - 1;
 }
 EXPORT_SYMBOL_GPL(cryptd_aead_queued);
 
@@ -1116,7 +1112,7 @@ void cryptd_free_aead(struct cryptd_aead *tfm)
 {
 	struct cryptd_aead_ctx *ctx = crypto_aead_ctx(&tfm->base);
 
-	if (atomic_dec_and_test(&ctx->refcnt))
+	if (refcount_dec_and_test(&ctx->refcnt))
 		crypto_free_aead(&tfm->base);
 }
 EXPORT_SYMBOL_GPL(cryptd_free_aead);

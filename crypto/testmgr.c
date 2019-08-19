@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Algorithm testing framework and tests.
  *
@@ -13,12 +14,6 @@
  *             Gabriele Paoloni <gabriele.paoloni@intel.com>
  *             Tadeusz Struk (tadeusz.struk@intel.com)
  *    Copyright (c) 2010, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
  */
 
 #include <crypto/aead.h>
@@ -1543,6 +1538,7 @@ static int test_hash_vec(const char *driver, const struct hash_testvec *vec,
 						req, desc, tsgl, hashstate);
 			if (err)
 				return err;
+			cond_resched();
 		}
 	}
 #endif
@@ -1554,14 +1550,12 @@ static int test_hash_vec(const char *driver, const struct hash_testvec *vec,
  * Generate a hash test vector from the given implementation.
  * Assumes the buffers in 'vec' were already allocated.
  */
-static void generate_random_hash_testvec(struct crypto_shash *tfm,
+static void generate_random_hash_testvec(struct shash_desc *desc,
 					 struct hash_testvec *vec,
 					 unsigned int maxkeysize,
 					 unsigned int maxdatasize,
 					 char *name, size_t max_namelen)
 {
-	SHASH_DESC_ON_STACK(desc, tfm);
-
 	/* Data */
 	vec->psize = generate_random_length(maxdatasize);
 	generate_random_bytes((u8 *)vec->plaintext, vec->psize);
@@ -1578,7 +1572,7 @@ static void generate_random_hash_testvec(struct crypto_shash *tfm,
 			vec->ksize = 1 + (prandom_u32() % maxkeysize);
 		generate_random_bytes((u8 *)vec->key, vec->ksize);
 
-		vec->setkey_error = crypto_shash_setkey(tfm, vec->key,
+		vec->setkey_error = crypto_shash_setkey(desc->tfm, vec->key,
 							vec->ksize);
 		/* If the key couldn't be set, no need to continue to digest. */
 		if (vec->setkey_error)
@@ -1586,7 +1580,6 @@ static void generate_random_hash_testvec(struct crypto_shash *tfm,
 	}
 
 	/* Digest */
-	desc->tfm = tfm;
 	vec->digest_error = crypto_shash_digest(desc, vec->plaintext,
 						vec->psize, (u8 *)vec->digest);
 done:
@@ -1613,10 +1606,11 @@ static int test_hash_vs_generic_impl(const char *driver,
 	const char *algname = crypto_hash_alg_common(tfm)->base.cra_name;
 	char _generic_driver[CRYPTO_MAX_ALG_NAME];
 	struct crypto_shash *generic_tfm = NULL;
+	struct shash_desc *generic_desc = NULL;
 	unsigned int i;
 	struct hash_testvec vec = { 0 };
 	char vec_name[64];
-	struct testvec_config cfg;
+	struct testvec_config *cfg;
 	char cfgname[TESTVEC_CONFIG_NAMELEN];
 	int err;
 
@@ -1645,6 +1639,20 @@ static int test_hash_vs_generic_impl(const char *driver,
 		       generic_driver, algname, err);
 		return err;
 	}
+
+	cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
+	if (!cfg) {
+		err = -ENOMEM;
+		goto out;
+	}
+
+	generic_desc = kzalloc(sizeof(*desc) +
+			       crypto_shash_descsize(generic_tfm), GFP_KERNEL);
+	if (!generic_desc) {
+		err = -ENOMEM;
+		goto out;
+	}
+	generic_desc->tfm = generic_tfm;
 
 	/* Check the algorithm properties for consistency. */
 
@@ -1677,12 +1685,12 @@ static int test_hash_vs_generic_impl(const char *driver,
 	}
 
 	for (i = 0; i < fuzz_iterations * 8; i++) {
-		generate_random_hash_testvec(generic_tfm, &vec,
+		generate_random_hash_testvec(generic_desc, &vec,
 					     maxkeysize, maxdatasize,
 					     vec_name, sizeof(vec_name));
-		generate_random_testvec_config(&cfg, cfgname, sizeof(cfgname));
+		generate_random_testvec_config(cfg, cfgname, sizeof(cfgname));
 
-		err = test_hash_vec_cfg(driver, &vec, vec_name, &cfg,
+		err = test_hash_vec_cfg(driver, &vec, vec_name, cfg,
 					req, desc, tsgl, hashstate);
 		if (err)
 			goto out;
@@ -1690,10 +1698,12 @@ static int test_hash_vs_generic_impl(const char *driver,
 	}
 	err = 0;
 out:
+	kfree(cfg);
 	kfree(vec.key);
 	kfree(vec.plaintext);
 	kfree(vec.digest);
 	crypto_free_shash(generic_tfm);
+	kzfree(generic_desc);
 	return err;
 }
 #else /* !CONFIG_CRYPTO_MANAGER_EXTRA_TESTS */
@@ -1811,6 +1821,7 @@ static int __alg_test_hash(const struct hash_testvec *vecs,
 				    hashstate);
 		if (err)
 			goto out;
+		cond_resched();
 	}
 	err = test_hash_vs_generic_impl(driver, generic_driver, maxkeysize, req,
 					desc, tsgl, hashstate);
@@ -2075,6 +2086,7 @@ static int test_aead_vec(const char *driver, int enc,
 						&cfg, req, tsgls);
 			if (err)
 				return err;
+			cond_resched();
 		}
 	}
 #endif
@@ -2285,7 +2297,7 @@ static int test_aead_vs_generic_impl(const char *driver,
 	unsigned int i;
 	struct aead_testvec vec = { 0 };
 	char vec_name[64];
-	struct testvec_config cfg;
+	struct testvec_config *cfg;
 	char cfgname[TESTVEC_CONFIG_NAMELEN];
 	int err;
 
@@ -2313,6 +2325,12 @@ static int test_aead_vs_generic_impl(const char *driver,
 		pr_err("alg: aead: error allocating %s (generic impl of %s): %d\n",
 		       generic_driver, algname, err);
 		return err;
+	}
+
+	cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
+	if (!cfg) {
+		err = -ENOMEM;
+		goto out;
 	}
 
 	generic_req = aead_request_alloc(generic_tfm, GFP_KERNEL);
@@ -2369,13 +2387,13 @@ static int test_aead_vs_generic_impl(const char *driver,
 					     blocksize,
 					     &test_desc->fuzz_params.aead,
 					     vec_name, sizeof(vec_name));
-		generate_random_testvec_config(&cfg, cfgname, sizeof(cfgname));
+		generate_random_testvec_config(cfg, cfgname, sizeof(cfgname));
 
-		err = test_aead_vec_cfg(driver, ENCRYPT, &vec, vec_name, &cfg,
+		err = test_aead_vec_cfg(driver, ENCRYPT, &vec, vec_name, cfg,
 					req, tsgls);
 		if (err)
 			goto out;
-		err = test_aead_vec_cfg(driver, DECRYPT, &vec, vec_name, &cfg,
+		err = test_aead_vec_cfg(driver, DECRYPT, &vec, vec_name, cfg,
 					req, tsgls);
 		if (err)
 			goto out;
@@ -2383,6 +2401,7 @@ static int test_aead_vs_generic_impl(const char *driver,
 	}
 	err = 0;
 out:
+	kfree(cfg);
 	kfree(vec.key);
 	kfree(vec.iv);
 	kfree(vec.assoc);
@@ -2415,6 +2434,7 @@ static int test_aead(const char *driver, int enc,
 				    tsgls);
 		if (err)
 			return err;
+		cond_resched();
 	}
 	return 0;
 }
@@ -2759,6 +2779,7 @@ static int test_skcipher_vec(const char *driver, int enc,
 						    &cfg, req, tsgls);
 			if (err)
 				return err;
+			cond_resched();
 		}
 	}
 #endif
@@ -2832,7 +2853,7 @@ static int test_skcipher_vs_generic_impl(const char *driver,
 	unsigned int i;
 	struct cipher_testvec vec = { 0 };
 	char vec_name[64];
-	struct testvec_config cfg;
+	struct testvec_config *cfg;
 	char cfgname[TESTVEC_CONFIG_NAMELEN];
 	int err;
 
@@ -2864,6 +2885,12 @@ static int test_skcipher_vs_generic_impl(const char *driver,
 		pr_err("alg: skcipher: error allocating %s (generic impl of %s): %d\n",
 		       generic_driver, algname, err);
 		return err;
+	}
+
+	cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
+	if (!cfg) {
+		err = -ENOMEM;
+		goto out;
 	}
 
 	generic_req = skcipher_request_alloc(generic_tfm, GFP_KERNEL);
@@ -2913,20 +2940,21 @@ static int test_skcipher_vs_generic_impl(const char *driver,
 	for (i = 0; i < fuzz_iterations * 8; i++) {
 		generate_random_cipher_testvec(generic_req, &vec, maxdatasize,
 					       vec_name, sizeof(vec_name));
-		generate_random_testvec_config(&cfg, cfgname, sizeof(cfgname));
+		generate_random_testvec_config(cfg, cfgname, sizeof(cfgname));
 
 		err = test_skcipher_vec_cfg(driver, ENCRYPT, &vec, vec_name,
-					    &cfg, req, tsgls);
+					    cfg, req, tsgls);
 		if (err)
 			goto out;
 		err = test_skcipher_vec_cfg(driver, DECRYPT, &vec, vec_name,
-					    &cfg, req, tsgls);
+					    cfg, req, tsgls);
 		if (err)
 			goto out;
 		cond_resched();
 	}
 	err = 0;
 out:
+	kfree(cfg);
 	kfree(vec.key);
 	kfree(vec.iv);
 	kfree(vec.ptext);
@@ -2958,6 +2986,7 @@ static int test_skcipher(const char *driver, int enc,
 					tsgls);
 		if (err)
 			return err;
+		cond_resched();
 	}
 	return 0;
 }
@@ -4009,18 +4038,6 @@ static const struct alg_test_desc alg_test_descs[] = {
 			.aead = __VECS(aegis128_tv_template)
 		}
 	}, {
-		.alg = "aegis128l",
-		.test = alg_test_aead,
-		.suite = {
-			.aead = __VECS(aegis128l_tv_template)
-		}
-	}, {
-		.alg = "aegis256",
-		.test = alg_test_aead,
-		.suite = {
-			.aead = __VECS(aegis256_tv_template)
-		}
-	}, {
 		.alg = "ansi_cprng",
 		.test = alg_test_cprng,
 		.suite = {
@@ -4666,6 +4683,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		}
 	}, {
 		.alg = "ecb(arc4)",
+		.generic_driver = "ecb(arc4)-generic",
 		.test = alg_test_skcipher,
 		.suite = {
 			.cipher = __VECS(arc4_tv_template)
@@ -4979,6 +4997,16 @@ static const struct alg_test_desc alg_test_descs[] = {
 			}
 		}
 	}, {
+		.alg = "lzo-rle",
+		.test = alg_test_comp,
+		.fips_allowed = 1,
+		.suite = {
+			.comp = {
+				.comp = __VECS(lzorle_comp_tv_template),
+				.decomp = __VECS(lzorle_decomp_tv_template)
+			}
+		}
+	}, {
 		.alg = "md4",
 		.test = alg_test_hash,
 		.suite = {
@@ -4995,18 +5023,6 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.test = alg_test_hash,
 		.suite = {
 			.hash = __VECS(michael_mic_tv_template)
-		}
-	}, {
-		.alg = "morus1280",
-		.test = alg_test_aead,
-		.suite = {
-			.aead = __VECS(morus1280_tv_template)
-		}
-	}, {
-		.alg = "morus640",
-		.test = alg_test_aead,
-		.suite = {
-			.aead = __VECS(morus640_tv_template)
 		}
 	}, {
 		.alg = "nhpoly1305",
@@ -5478,9 +5494,11 @@ int alg_test(const char *driver, const char *alg, u32 type, u32 mask)
 					     type, mask);
 
 test_done:
-	if (rc && (fips_enabled || panic_on_fail))
+	if (rc && (fips_enabled || panic_on_fail)) {
+		fips_fail_notify();
 		panic("alg: self-tests for %s (%s) failed in %s mode!\n",
 		      driver, alg, fips_enabled ? "fips" : "panic_on_fail");
+	}
 
 	if (fips_enabled && !rc)
 		pr_info("alg: self-tests for %s (%s) passed\n", driver, alg);

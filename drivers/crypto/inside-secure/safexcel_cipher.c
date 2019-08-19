@@ -191,7 +191,7 @@ static int safexcel_skcipher_aes_setkey(struct crypto_skcipher *ctfm,
 	struct crypto_aes_ctx aes;
 	int ret, i;
 
-	ret = crypto_aes_expand_key(&aes, key, len);
+	ret = aes_expandkey(&aes, key, len);
 	if (ret) {
 		crypto_skcipher_set_flags(ctfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
 		return ret;
@@ -255,7 +255,7 @@ static int safexcel_aead_setkey(struct crypto_aead *ctfm, const u8 *key,
 			goto badkey_expflags;
 		break;
 	case SAFEXCEL_AES:
-		err = crypto_aes_expand_key(&aes, keys.enckey, keys.enckeylen);
+		err = aes_expandkey(&aes, keys.enckey, keys.enckeylen);
 		if (unlikely(err))
 			goto badkey;
 		break;
@@ -1116,7 +1116,7 @@ static int safexcel_skcipher_aesctr_setkey(struct crypto_skcipher *ctfm,
 	ctx->nonce = *(u32 *)(key + len - CTR_RFC3686_NONCE_SIZE);
 	/* exclude the nonce here */
 	keylen = len - CTR_RFC3686_NONCE_SIZE;
-	ret = crypto_aes_expand_key(&aes, key, keylen);
+	ret = aes_expandkey(&aes, key, keylen);
 	if (ret) {
 		crypto_skcipher_set_flags(ctfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
 		return ret;
@@ -1797,7 +1797,7 @@ static int safexcel_skcipher_aesxts_setkey(struct crypto_skcipher *ctfm,
 
 	/* Only half of the key data is cipher key */
 	keylen = (len >> 1);
-	ret = crypto_aes_expand_key(&aes, key, keylen);
+	ret = aes_expandkey(&aes, key, keylen);
 	if (ret) {
 		crypto_skcipher_set_flags(ctfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
 		return ret;
@@ -1816,7 +1816,7 @@ static int safexcel_skcipher_aesxts_setkey(struct crypto_skcipher *ctfm,
 		ctx->key[i] = cpu_to_le32(aes.key_enc[i]);
 
 	/* The other half is the tweak key */
-	ret = crypto_aes_expand_key(&aes, (u8 *)(key + keylen), keylen);
+	ret = aes_expandkey(&aes, (u8 *)(key + keylen), keylen);
 	if (ret) {
 		crypto_skcipher_set_flags(ctfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
 		return ret;

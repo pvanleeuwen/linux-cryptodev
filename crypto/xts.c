@@ -1,17 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* XTS: as defined in IEEE1619/D16
  *	http://grouper.ieee.org/groups/1619/email/pdf00086.pdf
- *	(sector sizes which are not a multiple of 16 bytes are,
- *	however currently unsupported)
  *
  * Copyright (c) 2007 Rik Snel <rsnel@cube.dyndns.org>
  *
  * Based on ecb.c
  * Copyright (c) 2006 Herbert Xu <herbert@gondor.apana.org.au>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 #include <crypto/internal/skcipher.h>
 #include <crypto/scatterwalk.h>
@@ -38,6 +32,7 @@ struct xts_instance_ctx {
 
 struct rctx {
 	le128 t;
+	struct scatterlist *tail;
 	struct scatterlist sg[2];
 	struct skcipher_request subreq;
 };
@@ -157,9 +152,9 @@ static void cts_done(struct crypto_async_request *areq, int err)
 	if (!err) {
 		struct rctx *rctx = skcipher_request_ctx(req);
 
-		scatterwalk_map_and_copy(&b, rctx->sg, 0, XTS_BLOCK_SIZE, 0);
+		scatterwalk_map_and_copy(&b, rctx->tail, 0, XTS_BLOCK_SIZE, 0);
 		le128_xor(&b, &rctx->t, &b);
-		scatterwalk_map_and_copy(&b, rctx->sg, 0, XTS_BLOCK_SIZE, 1);
+		scatterwalk_map_and_copy(&b, rctx->tail, 0, XTS_BLOCK_SIZE, 1);
 	}
 
 	skcipher_request_complete(req, err);
@@ -173,31 +168,32 @@ static int cts_final(struct skcipher_request *req,
 	struct rctx *rctx = skcipher_request_ctx(req);
 	struct skcipher_request *subreq = &rctx->subreq;
 	int tail = req->cryptlen % XTS_BLOCK_SIZE;
-	struct scatterlist *sg;
 	le128 b[2];
 	int err;
 
-	sg = scatterwalk_ffwd(rctx->sg, req->dst, offset - XTS_BLOCK_SIZE);
+	rctx->tail = scatterwalk_ffwd(rctx->sg, req->dst,
+				      offset - XTS_BLOCK_SIZE);
 
-	scatterwalk_map_and_copy(b, sg, 0, XTS_BLOCK_SIZE, 0);
+	scatterwalk_map_and_copy(b, rctx->tail, 0, XTS_BLOCK_SIZE, 0);
 	memcpy(b + 1, b, tail);
 	scatterwalk_map_and_copy(b, req->src, offset, tail, 0);
 
 	le128_xor(b, &rctx->t, b);
 
-	scatterwalk_map_and_copy(b, sg, 0, XTS_BLOCK_SIZE + tail, 1);
+	scatterwalk_map_and_copy(b, rctx->tail, 0, XTS_BLOCK_SIZE + tail, 1);
 
 	skcipher_request_set_tfm(subreq, ctx->child);
 	skcipher_request_set_callback(subreq, req->base.flags, cts_done, req);
-	skcipher_request_set_crypt(subreq, sg, sg, XTS_BLOCK_SIZE, NULL);
+	skcipher_request_set_crypt(subreq, rctx->tail, rctx->tail,
+				   XTS_BLOCK_SIZE, NULL);
 
 	err = crypt(subreq);
 	if (err)
 		return err;
 
-	scatterwalk_map_and_copy(b, sg, 0, XTS_BLOCK_SIZE, 0);
+	scatterwalk_map_and_copy(b, rctx->tail, 0, XTS_BLOCK_SIZE, 0);
 	le128_xor(b, &rctx->t, b);
-	scatterwalk_map_and_copy(b, sg, 0, XTS_BLOCK_SIZE, 1);
+	scatterwalk_map_and_copy(b, rctx->tail, 0, XTS_BLOCK_SIZE, 1);
 
 	return 0;
 }
