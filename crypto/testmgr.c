@@ -661,8 +661,14 @@ static int verify_correct_output(const struct test_sglist *tsgl,
 		}
 		len = min(len, len_to_check);
 		actual_output = page_address(sg_page(sg)) + offset;
-		if (memcmp(expected_output, actual_output, len) != 0)
+		if (memcmp(expected_output, actual_output, len) != 0) {
+			pr_err("Vector mismatch!");
+			pr_err("Expected\n");
+			hexdump((unsigned char *)expected_output, len);
+			pr_err("Actual\n");
+			hexdump((unsigned char *)actual_output, len);
 			return -EINVAL;
+		}
 		if (check_poison &&
 		    !testmgr_is_poison(actual_output + len, TESTMGR_POISON_LEN))
 			return -EOVERFLOW;
