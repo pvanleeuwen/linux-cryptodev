@@ -1111,6 +1111,12 @@ static int check_hash_result(const char *type,
 	if (memcmp(result, vec->digest, digestsize) != 0) {
 		pr_err("alg: %s: %s test failed (wrong result) on test vector %s, cfg=\"%s\"\n",
 		       type, driver, vec_name, cfg->name);
+
+		pr_err("Expected\n");
+		hexdump((unsigned char *)vec->digest, digestsize);
+		pr_err("Actual\n");
+		hexdump((unsigned char *)result, digestsize);
+
 		return -EINVAL;
 	}
 	if (!testmgr_is_poison(&result[digestsize], TESTMGR_POISON_LEN)) {
@@ -1556,7 +1562,7 @@ static int test_hash_vec(const char *driver, const struct hash_testvec *vec,
  * Generate a hash test vector from the given implementation.
  * Assumes the buffers in 'vec' were already allocated.
  */
-static void generate_random_hash_testvec(struct shash_desc *desc,
+static void generate_random_hash_testvec(int i, struct shash_desc *desc,
 					 struct hash_testvec *vec,
 					 unsigned int maxkeysize,
 					 unsigned int maxdatasize,
@@ -1589,8 +1595,8 @@ static void generate_random_hash_testvec(struct shash_desc *desc,
 	vec->digest_error = crypto_shash_digest(desc, vec->plaintext,
 						vec->psize, (u8 *)vec->digest);
 done:
-	snprintf(name, max_namelen, "\"random: psize=%u ksize=%u\"",
-		 vec->psize, vec->ksize);
+	snprintf(name, max_namelen, "\"random %d: psize=%u ksize=%u\"",
+		 i, vec->psize, vec->ksize);
 }
 
 /*
@@ -1691,7 +1697,7 @@ static int test_hash_vs_generic_impl(const char *driver,
 	}
 
 	for (i = 0; i < fuzz_iterations * 8; i++) {
-		generate_random_hash_testvec(generic_desc, &vec,
+		generate_random_hash_testvec(i, generic_desc, &vec,
 					     maxkeysize, maxdatasize,
 					     vec_name, sizeof(vec_name));
 		generate_random_testvec_config(cfg, cfgname, sizeof(cfgname));
