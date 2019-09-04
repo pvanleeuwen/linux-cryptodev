@@ -124,14 +124,6 @@ static int caam_jr_remove(struct platform_device *pdev)
 	jrdev = &pdev->dev;
 	jrpriv = dev_get_drvdata(jrdev);
 
-	/*
-	 * Return EBUSY if job ring already allocated.
-	 */
-	if (atomic_read(&jrpriv->tfm_count)) {
-		dev_err(jrdev, "Device is busy\n");
-		return -EBUSY;
-	}
-
 	/* Unregister JR-based RNG & crypto algorithms */
 	unregister_algs();
 
@@ -300,7 +292,7 @@ struct device *caam_jr_alloc(void)
 
 	if (min_jrpriv) {
 		atomic_inc(&min_jrpriv->tfm_count);
-		dev = min_jrpriv->dev;
+		dev = get_device(min_jrpriv->dev);
 	}
 	spin_unlock(&driver_data.jr_alloc_lock);
 
@@ -318,13 +310,16 @@ void caam_jr_free(struct device *rdev)
 	struct caam_drv_private_jr *jrpriv = dev_get_drvdata(rdev);
 
 	atomic_dec(&jrpriv->tfm_count);
+	put_device(rdev);
 }
 EXPORT_SYMBOL(caam_jr_free);
 
 /**
  * caam_jr_enqueue() - Enqueue a job descriptor head. Returns 0 if OK,
  * -EBUSY if the queue is full, -EIO if it cannot map the caller's
- * descriptor.
+ * descriptor, -ENODEV if given device was removed and is no longer
+ * valid
+ *
  * @dev:  device of the job ring to be used. This device should have
  *        been assigned prior by caam_jr_register().
  * @desc: points to a job descriptor that execute our request. All
@@ -354,15 +349,32 @@ int caam_jr_enqueue(struct device *dev, u32 *desc,
 				u32 status, void *areq),
 		    void *areq)
 {
-	struct caam_drv_private_jr *jrp = dev_get_drvdata(dev);
+	struct caam_drv_private_jr *jrp;
 	struct caam_jrentry_info *head_entry;
 	int head, tail, desc_size;
 	dma_addr_t desc_dma;
+
+	/*
+	 * Lock the device to prevent it from being removed while we
+	 * are using it
+	 */
+	device_lock(dev);
+
+	/*
+	 * If driver data is NULL, it is very likely that this device
+	 * was removed already. Nothing we can do here but bail out.
+	 */
+	jrp = dev_get_drvdata(dev);
+	if (!jrp) {
+		device_unlock(dev);
+		return -ENODEV;
+	}
 
 	desc_size = (caam32_to_cpu(*desc) & HDR_JD_LENGTH_MASK) * sizeof(u32);
 	desc_dma = dma_map_single(dev, desc, desc_size, DMA_TO_DEVICE);
 	if (dma_mapping_error(dev, desc_dma)) {
 		dev_err(dev, "caam_jr_enqueue(): can't map jobdesc\n");
+		device_unlock(dev);
 		return -EIO;
 	}
 
@@ -375,6 +387,7 @@ int caam_jr_enqueue(struct device *dev, u32 *desc,
 	    CIRC_SPACE(head, tail, JOBR_DEPTH) <= 0) {
 		spin_unlock_bh(&jrp->inplock);
 		dma_unmap_single(dev, desc_dma, desc_size, DMA_TO_DEVICE);
+		device_unlock(dev);
 		return -EBUSY;
 	}
 
@@ -411,6 +424,7 @@ int caam_jr_enqueue(struct device *dev, u32 *desc,
 		jrp->inpring_avail = rd_reg32(&jrp->rregs->inpring_avail);
 
 	spin_unlock_bh(&jrp->inplock);
+	device_unlock(dev);
 
 	return 0;
 }
