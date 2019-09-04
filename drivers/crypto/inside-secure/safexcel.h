@@ -809,5 +809,6 @@ extern struct safexcel_alg_template safexcel_alg_ccm;
 extern struct safexcel_alg_template safexcel_alg_crc32;
 extern struct safexcel_alg_template safexcel_alg_cbcmac;
 extern struct safexcel_alg_template safexcel_alg_xcbcmac;
+extern struct safexcel_alg_template safexcel_alg_cmac;
 
 #endif
