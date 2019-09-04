@@ -557,6 +557,26 @@ static void caam_remove_debugfs(void *root)
 }
 #endif
 
+static void caam_platform_device_unregister(void *data)
+{
+	platform_device_unregister(data);
+}
+
+static int caam_platform_device_register(struct device *dev, const char *name)
+{
+	struct platform_device *pdev;
+	int ret;
+
+	pdev = platform_device_register_simple(name,  -1, NULL, 0);
+	ret = PTR_ERR_OR_ZERO(pdev);
+	if (ret)
+		return ret;
+
+	return devm_add_action_or_reset(dev,
+					caam_platform_device_unregister,
+					pdev);
+}
+
 /* Probe routine for CAAM top (controller) level */
 static int caam_probe(struct platform_device *pdev)
 {
@@ -905,6 +925,25 @@ static int caam_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(dev, "JR platform devices creation error\n");
 		return ret;
+	}
+
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_FSL_CAAM_RNG_API)) {
+		u32 rng_inst;
+
+		/* Check for an instantiated RNG before registration */
+		if (ctrlpriv->era < 10)
+			rng_inst = (rd_reg32(&ctrl->perfmon.cha_num_ls) &
+				    CHA_ID_LS_RNG_MASK) >> CHA_ID_LS_RNG_SHIFT;
+		else
+			rng_inst = rd_reg32(&ctrl->vreg.rng) &
+				CHA_VER_NUM_MASK;
+
+
+		if (rng_inst) {
+			ret = caam_platform_device_register(dev, "caamrng");
+			if (ret)
+				return ret;
+		}
 	}
 
 	return 0;

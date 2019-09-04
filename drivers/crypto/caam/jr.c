@@ -37,7 +37,6 @@ static void register_algs(struct device *dev)
 	caam_algapi_init(dev);
 	caam_algapi_hash_init(dev);
 	caam_pkc_init(dev);
-	caam_rng_init(dev);
 	caam_qi_algapi_init(dev);
 
 algs_unlock:
@@ -53,7 +52,6 @@ static void unregister_algs(void)
 
 	caam_qi_algapi_exit();
 
-	caam_rng_exit();
 	caam_pkc_exit();
 	caam_algapi_hash_exit();
 	caam_algapi_exit();
@@ -287,7 +285,7 @@ struct device *caam_jr_alloc(void)
 
 	if (list_empty(&driver_data.jr_list)) {
 		spin_unlock(&driver_data.jr_alloc_lock);
-		return ERR_PTR(-ENODEV);
+		return ERR_PTR(-EPROBE_DEFER);
 	}
 
 	list_for_each_entry(jrpriv, &driver_data.jr_list, list_node) {
@@ -587,15 +585,32 @@ static struct platform_driver caam_jr_driver = {
 	.remove      = caam_jr_remove,
 };
 
+extern struct platform_driver caamrng_driver;
+
 static int __init jr_driver_init(void)
 {
+	int ret;
+
 	spin_lock_init(&driver_data.jr_alloc_lock);
 	INIT_LIST_HEAD(&driver_data.jr_list);
-	return platform_driver_register(&caam_jr_driver);
+	ret = platform_driver_register(&caam_jr_driver);
+	if (ret)
+		return ret;
+
+	if (IS_ENABLED(CONFIG_CRYPTO_DEV_FSL_CAAM_RNG_API)) {
+		ret = platform_driver_register(&caamrng_driver);
+		if (ret) {
+			platform_driver_unregister(&caam_jr_driver);
+			return ret;
+		}
+	}
+
+	return 0;
 }
 
 static void __exit jr_driver_exit(void)
 {
+	platform_driver_unregister(&caamrng_driver);
 	platform_driver_unregister(&caam_jr_driver);
 }
 
