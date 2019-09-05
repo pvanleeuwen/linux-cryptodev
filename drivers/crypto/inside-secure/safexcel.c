@@ -1544,7 +1544,9 @@ static struct pci_driver safexcel_pci_driver = {
 
 static int __init safexcel_init(void)
 {
+#if IS_ENABLED(CONFIG_PCI)
 	int rc;
+#endif
 
 #if IS_ENABLED(CONFIG_OF)
 		/* Register platform driver */
