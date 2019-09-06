@@ -1505,29 +1505,29 @@ static int __init safexcel_init(void)
 {
 	int rc;
 
-#if IS_ENABLED(CONFIG_OF)
-		/* Register platform driver */
-		platform_driver_register(&crypto_safexcel);
-#endif
-
 #if IS_ENABLED(CONFIG_PCI)
-		/* Register PCI driver */
-		rc = pci_register_driver(&safexcel_pci_driver);
+	/* Register PCI driver */
+	rc = pci_register_driver(&safexcel_pci_driver);
 #endif
 
-	return 0;
+#if IS_ENABLED(CONFIG_OF)
+	/* Register platform driver */
+	rc = platform_driver_register(&crypto_safexcel);
+#endif
+
+	return rc;
 }
 
 static void __exit safexcel_exit(void)
 {
 #if IS_ENABLED(CONFIG_OF)
-		/* Unregister platform driver */
-		platform_driver_unregister(&crypto_safexcel);
+	/* Unregister platform driver */
+	platform_driver_unregister(&crypto_safexcel);
 #endif
 
 #if IS_ENABLED(CONFIG_PCI)
-		/* Unregister PCI driver if successfully registered before */
-		pci_unregister_driver(&safexcel_pci_driver);
+	/* Unregister PCI driver if successfully registered before */
+	pci_unregister_driver(&safexcel_pci_driver);
 #endif
 }
 
