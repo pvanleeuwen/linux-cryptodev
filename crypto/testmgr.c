@@ -4109,6 +4109,18 @@ static const struct alg_test_desc alg_test_descs[] = {
 			}
 		}
 	}, {
+		.alg = "authenc(hmac(sha1),cbc(sm4))",
+		.test = alg_test_aead,
+		.fuzz_params = {
+			.aead = {
+				.ckeylensel = __LENS(sm4_klen_template),
+				.akeylensel = __LENS(hmac_sha1_klen_template),
+				.authsizesel = __LENS(sha1_authsize_template),
+				.aadlensel = __LENS(aead_alen_template),
+				.ptxtlensel = __LENS(aead_plen_template),
+			}
+		}
+	}, {
 		.alg = "authenc(hmac(sha1),ctr(aes))",
 		.test = alg_test_null,
 		.fips_allowed = 1,
@@ -4125,6 +4137,18 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.fuzz_params = {
 			.aead = {
 				.ckeylensel = __LENS(aes_klen_template),
+				.akeylensel = __LENS(hmac_sha1_klen_template),
+				.authsizesel = __LENS(sha1_authsize_template),
+				.aadlensel = __LENS(aead_alen_template),
+				.ptxtlensel = __LENS(aead_plen_template),
+			}
+		}
+	}, {
+		.alg = "authenc(hmac(sha1),rfc3686(ctr(sm4)))",
+		.test = alg_test_aead,
+		.fuzz_params = {
+			.aead = {
+				.ckeylensel = __LENS(sm4_klen_template),
 				.akeylensel = __LENS(hmac_sha1_klen_template),
 				.authsizesel = __LENS(sha1_authsize_template),
 				.aadlensel = __LENS(aead_alen_template),
@@ -4298,6 +4322,30 @@ static const struct alg_test_desc alg_test_descs[] = {
 				.ckeylensel = __LENS(aes_klen_template),
 				.akeylensel = __LENS(hmac_sha512_klen_template),
 				.authsizesel = __LENS(sha512_authsize_template),
+				.aadlensel = __LENS(aead_alen_template),
+				.ptxtlensel = __LENS(aead_plen_template),
+			}
+		}
+	}, {
+		.alg = "authenc(hmac(sm3),cbc(sm4))",
+		.test = alg_test_aead,
+		.fuzz_params = {
+			.aead = {
+				.ckeylensel = __LENS(sm4_klen_template),
+				.akeylensel = __LENS(hmac_sha256_klen_template),
+				.authsizesel = __LENS(sha256_authsize_template),
+				.aadlensel = __LENS(aead_alen_template),
+				.ptxtlensel = __LENS(aead_plen_template),
+			}
+		}
+	}, {
+		.alg = "authenc(hmac(sm3),rfc3686(ctr(sm4)))",
+		.test = alg_test_aead,
+		.fuzz_params = {
+			.aead = {
+				.ckeylensel = __LENS(sm4_klen_template),
+				.akeylensel = __LENS(hmac_sha256_klen_template),
+				.authsizesel = __LENS(sha256_authsize_template),
 				.aadlensel = __LENS(aead_alen_template),
 				.ptxtlensel = __LENS(aead_plen_template),
 			}
