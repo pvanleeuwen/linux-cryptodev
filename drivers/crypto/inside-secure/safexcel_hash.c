@@ -784,9 +784,14 @@ static int safexcel_ahash_final(struct ahash_request *areq)
 		else if (ctx->alg == CONTEXT_CONTROL_CRYPTO_ALG_SHA512)
 			memcpy(areq->result, sha512_zero_message_hash,
 			       SHA512_DIGEST_SIZE);
-		else if (ctx->alg == CONTEXT_CONTROL_CRYPTO_ALG_SM3)
-			memcpy(areq->result, sm3_zero_message_hash,
-			       SM3_DIGEST_SIZE);
+		else if (ctx->alg == CONTEXT_CONTROL_CRYPTO_ALG_SM3) {
+			if (IS_ENABLED(CONFIG_CRYPTO_SM3))
+				memcpy(areq->result, sm3_zero_message_hash,
+				       SM3_DIGEST_SIZE);
+			else
+				memcpy(areq->result,
+				       EIP197_SM3_ZEROM_HASH, SM3_DIGEST_SIZE);
+		}
 
 		return 0;
 	} else if (unlikely(req->digest == CONTEXT_CONTROL_DIGEST_XCM &&

@@ -670,6 +670,12 @@ enum safexcel_eip_version {
 /* Priority we use for advertising our algorithms */
 #define SAFEXCEL_CRA_PRIORITY		300
 
+/* SM3 digest result for zero length message */
+#define EIP197_SM3_ZEROM_HASH	"\x1A\xB2\x1D\x83\x55\xCF\xA1\x7F" \
+				"\x8E\x61\x19\x48\x31\xE8\x1A\x8F" \
+				"\x22\xBE\xC8\xC7\x28\xFE\xFB\x74" \
+				"\x7E\xD0\x35\xEB\x50\x82\xAA\x2B"
+
 /* EIP algorithm presence flags */
 enum safexcel_eip_algorithms {
 	SAFEXCEL_ALG_BC0      = BIT(5),
