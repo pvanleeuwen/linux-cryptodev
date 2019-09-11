@@ -223,6 +223,27 @@ static const struct len_range_sel aes_klen_template[] = {
 };
 
 /*
+ * SM4 key size ranges:
+ * 75% of the only legal keysize of 128 bits
+ * plus 25% of illegal sizes in between 0 and 1024 bits.
+ */
+static const struct len_range_sel sm4_klen_template[] = {
+	{
+	.len_lo = 0,
+	.len_hi = 15,
+	.proportion_of_total = 31,
+	}, {
+	.len_lo = 16,
+	.len_hi = 16,
+	.proportion_of_total = 750,
+	}, {
+	.len_lo = 17,
+	.len_hi = 128,
+	.proportion_of_total = 219,
+	}
+};
+
+/*
  * Single DES key size ranges:
  * 90% legal keys of size 8, rest illegal between 0 and 32
  */
