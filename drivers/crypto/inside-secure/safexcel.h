@@ -14,14 +14,23 @@
 #include <crypto/sha.h>
 #include <crypto/skcipher.h>
 
-#define EIP197_HIA_VERSION_LE			0xca35
-#define EIP197_HIA_VERSION_BE			0x35ca
+#define EIP197_HIA_VERSION_BE			0xca35
+#define EIP197_HIA_VERSION_LE			0x35ca
+#define EIP97_VERSION_LE			0x9e61
+#define EIP197_VERSION_LE			0x3ac5
+#define EIP96_VERSION_LE			0x9f60
+#define EIP197_REG_LO16(reg)			(reg & 0xffff)
+#define EIP197_REG_HI16(reg)			((reg >> 16) & 0xffff)
+#define EIP197_VERSION_MASK(reg)		((reg >> 16) & 0xfff)
+#define EIP197_VERSION_SWAP(reg)		(((reg & 0xf0) << 4) | \
+						((reg >> 4) & 0xf0) | \
+						((reg >> 12) & 0xf))
 
 /* Static configuration */
 #define EIP197_DEFAULT_RING_SIZE		400
 #define EIP197_MAX_TOKENS			18
 #define EIP197_MAX_RINGS			4
-#define EIP197_FETCH_COUNT			1
+#define EIP197_FETCH_DEPTH			2
 #define EIP197_MAX_BATCH_SZ			64
 
 #define EIP197_GFP_FLAGS(base)	((base).flags & CRYPTO_TFM_REQ_MAY_SLEEP ? \
@@ -70,6 +79,7 @@
 #define EIP197_HIA_DSE_THR(priv)	((priv)->base + (priv)->offsets.hia_dse_thr)
 #define EIP197_HIA_GEN_CFG(priv)	((priv)->base + (priv)->offsets.hia_gen_cfg)
 #define EIP197_PE(priv)			((priv)->base + (priv)->offsets.pe)
+#define EIP197_GLOBAL(priv)		((priv)->base + (priv)->offsets.global)
 
 /* EIP197 base offsets */
 #define EIP197_HIA_AIC_BASE		0x90000
@@ -82,6 +92,7 @@
 #define EIP197_HIA_DSE_THR_BASE		0x8d040
 #define EIP197_HIA_GEN_CFG_BASE		0xf0000
 #define EIP197_PE_BASE			0xa0000
+#define EIP197_GLOBAL_BASE		0xf0000
 
 /* EIP97 base offsets */
 #define EIP97_HIA_AIC_BASE		0x0
@@ -94,6 +105,7 @@
 #define EIP97_HIA_DSE_THR_BASE		0xf600
 #define EIP97_HIA_GEN_CFG_BASE		0x10000
 #define EIP97_PE_BASE			0x10000
+#define EIP97_GLOBAL_BASE		0x10000
 
 /* CDR/RDR register offsets */
 #define EIP197_HIA_xDR_OFF(priv, r)		(EIP197_HIA_AIC_xDR(priv) + (r) * 0x1000)
@@ -145,10 +157,13 @@
 #define EIP197_PE_EIP96_FUNCTION_EN(n)		(0x1004 + (0x2000 * (n)))
 #define EIP197_PE_EIP96_CONTEXT_CTRL(n)		(0x1008 + (0x2000 * (n)))
 #define EIP197_PE_EIP96_CONTEXT_STAT(n)		(0x100c + (0x2000 * (n)))
+#define EIP197_PE_EIP96_FUNCTION2_EN(n)		(0x1030 + (0x2000 * (n)))
 #define EIP197_PE_EIP96_OPTIONS(n)		(0x13f8 + (0x2000 * (n)))
+#define EIP197_PE_EIP96_VERSION(n)		(0x13fc + (0x2000 * (n)))
 #define EIP197_PE_OUT_DBUF_THRES(n)		(0x1c00 + (0x2000 * (n)))
 #define EIP197_PE_OUT_TBUF_THRES(n)		(0x1d00 + (0x2000 * (n)))
 #define EIP197_MST_CTRL				0xfff4
+#define EIP197_VERSION				0xfffc
 
 /* EIP197-specific registers, no indirection */
 #define EIP197_CLASSIFICATION_RAMS		0xe0000
@@ -163,6 +178,12 @@
 #define EIP197_TRC_ECCADMINSTAT			0xf0838
 #define EIP197_TRC_ECCDATASTAT			0xf083c
 #define EIP197_TRC_ECCDATA			0xf0840
+#define EIP197_FLUE_CACHEBASE_LO(n)		(0xf6000 + (32 * (n)))
+#define EIP197_FLUE_CACHEBASE_HI(n)		(0xf6004 + (32 * (n)))
+#define EIP197_FLUE_CONFIG(n)			(0xf6010 + (32 * (n)))
+#define EIP197_FLUE_OFFSETS			0xf6808
+#define EIP197_FLUE_ARC4_OFFSET			0xf680c
+#define EIP197_FLUE_IFC_LUT(n)			(0xf6820 + (4 * (n)))
 #define EIP197_CS_RAM_CTRL			0xf7ff0
 
 /* EIP197_HIA_xDR_DESC_SIZE */
@@ -210,6 +231,19 @@
 #define EIP197_N_PES_OFFSET			4
 #define EIP197_N_PES_MASK			GENMASK(4, 0)
 #define EIP97_N_PES_MASK			GENMASK(2, 0)
+#define EIP197_HWDATAW_OFFSET			25
+#define EIP197_HWDATAW_MASK			GENMASK(3, 0)
+#define EIP97_HWDATAW_MASK			GENMASK(2, 0)
+#define EIP197_CFSIZE_OFFSET			9
+#define EIP197_CFSIZE_ADJUST			4
+#define EIP97_CFSIZE_OFFSET			8
+#define EIP197_CFSIZE_MASK			GENMASK(3, 0)
+#define EIP97_CFSIZE_MASK			GENMASK(4, 0)
+#define EIP197_RFSIZE_OFFSET			12
+#define EIP197_RFSIZE_ADJUST			4
+#define EIP97_RFSIZE_OFFSET			12
+#define EIP197_RFSIZE_MASK			GENMASK(3, 0)
+#define EIP97_RFSIZE_MASK			GENMASK(4, 0)
 
 /* EIP197_HIA_AIC_R_ENABLE_CTRL */
 #define EIP197_CDR_IRQ(n)			BIT((n) * 2)
@@ -252,6 +286,7 @@
 #define EIP197_MST_CTRL_TX_MAX_CMD(n)		(((n) & 0xf) << 20)
 #define EIP197_MST_CTRL_BYTE_SWAP		BIT(24)
 #define EIP197_MST_CTRL_NO_BYTE_SWAP		BIT(25)
+#define EIP197_MST_CTRL_BYTE_SWAP_BITS          GENMASK(25, 24)
 
 /* EIP197_PE_IN_DBUF/TBUF_THRES */
 #define EIP197_PE_IN_xBUF_THRES_MIN(n)		((n) << 8)
@@ -281,8 +316,8 @@
 
 /* EIP197_PE_EIP96_TOKEN_CTRL */
 #define EIP197_PE_EIP96_TOKEN_CTRL_CTX_UPDATES		BIT(16)
-#define EIP197_PE_EIP96_TOKEN_CTRL_REUSE_CTX		BIT(19)
-#define EIP197_PE_EIP96_TOKEN_CTRL_POST_REUSE_CTX	BIT(20)
+#define EIP197_PE_EIP96_TOKEN_CTRL_NO_TOKEN_WAIT	BIT(17)
+#define EIP197_PE_EIP96_TOKEN_CTRL_ENABLE_TIMEOUT	BIT(22)
 
 /* EIP197_PE_EIP96_FUNCTION_EN */
 #define EIP197_FUNCTION_ALL			0xffffffff
@@ -291,6 +326,9 @@
 #define EIP197_CONTEXT_SIZE(n)			(n)
 #define EIP197_ADDRESS_MODE			BIT(8)
 #define EIP197_CONTROL_MODE			BIT(9)
+
+/* EIP197_FLUE_CONFIG */
+#define EIP197_FLUE_CONFIG_MAGIC		0xc7000004
 
 /* Context Control */
 struct safexcel_context_record {
@@ -366,6 +404,8 @@ struct safexcel_context_record {
 #define EIP197_TRC_ENABLE_1			BIT(5)
 #define EIP197_TRC_ENABLE_2			BIT(6)
 #define EIP197_TRC_ENABLE_MASK			GENMASK(6, 4)
+#define EIP197_CS_BANKSEL_MASK			GENMASK(14, 12)
+#define EIP197_CS_BANKSEL_OFS			12
 
 /* EIP197_TRC_PARAMS */
 #define EIP197_TRC_PARAMS_SW_RESET		BIT(0)
@@ -383,19 +423,11 @@ struct safexcel_context_record {
 #define EIP197_TRC_PARAMS2_RC_SZ_SMALL(n)	((n) << 18)
 
 /* Cache helpers */
-#define EIP197B_CS_RC_MAX			52
-#define EIP197D_CS_RC_MAX			96
+#define EIP197_CS_TRC_REC_WC			64
 #define EIP197_CS_RC_SIZE			(4 * sizeof(u32))
 #define EIP197_CS_RC_NEXT(x)			(x)
 #define EIP197_CS_RC_PREV(x)			((x) << 10)
 #define EIP197_RC_NULL				0x3ff
-#define EIP197B_CS_TRC_REC_WC			59
-#define EIP197D_CS_TRC_REC_WC			64
-#define EIP197B_CS_TRC_LG_REC_WC		73
-#define EIP197D_CS_TRC_LG_REC_WC		80
-#define EIP197B_CS_HT_WC			64
-#define EIP197D_CS_HT_WC			256
-
 
 /* Result data */
 struct result_data_desc {
@@ -436,6 +468,14 @@ struct safexcel_result_desc {
 
 	struct result_data_desc result_data;
 } __packed;
+
+/*
+ * The EIP(1)97 only needs to fetch the descriptor part of
+ * the result descriptor, not the result token part!
+ */
+#define EIP197_RD64_FETCH_SIZE		((sizeof(struct safexcel_result_desc) -\
+					  sizeof(struct result_data_desc)) /\
+					 sizeof(u32))
 
 struct safexcel_token {
 	u32 packet_length:17;
@@ -651,14 +691,22 @@ struct safexcel_register_offsets {
 	u32 hia_dse_thr;
 	u32 hia_gen_cfg;
 	u32 pe;
+	u32 global;
 };
 
 enum safexcel_flags {
-	EIP197_TRC_CACHE = BIT(0),
+	EIP197_TRC_CACHE	= BIT(0),
+	SAFEXCEL_HW_EIP197	= BIT(1),
 };
 
 struct safexcel_hwconfig {
 	enum safexcel_eip_algorithms algo_flags;
+	int hwver;
+	int hiaver;
+	int pever;
+	int hwdataw;
+	int hwcfsize;
+	int hwrfsize;
 };
 
 struct safexcel_crypto_priv {

@@ -500,7 +500,11 @@ static int caam_jr_init(struct device *dev)
 
 static void caam_jr_irq_dispose_mapping(void *data)
 {
+<<<<<<< HEAD
 	irq_dispose_mapping((int)data);
+=======
+	irq_dispose_mapping((unsigned long)data);
+>>>>>>> upstream/master
 }
 
 /*
@@ -558,7 +562,11 @@ static int caam_jr_probe(struct platform_device *pdev)
 	}
 
 	error = devm_add_action_or_reset(jrdev, caam_jr_irq_dispose_mapping,
+<<<<<<< HEAD
 					 (void *)jrpriv->irq);
+=======
+					 (void *)(unsigned long)jrpriv->irq);
+>>>>>>> upstream/master
 	if (error)
 		return error;
 
