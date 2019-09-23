@@ -424,6 +424,7 @@ struct safexcel_context_record {
 #define CONTEXT_CONTROL_CRYPTO_MODE_XTS		(7 << 0)
 #define CONTEXT_CONTROL_CRYPTO_MODE_XCM		((6 << 0) | BIT(17))
 #define CONTEXT_CONTROL_CHACHA20_MODE_CALC_OTK	(12 << 0)
+#define CONTEXT_CONTROL_CRYPTO_MODE_CHACHAPOLY	(14 << 0)
 #define CONTEXT_CONTROL_IV0			BIT(5)
 #define CONTEXT_CONTROL_IV1			BIT(6)
 #define CONTEXT_CONTROL_IV2			BIT(7)
@@ -437,7 +438,8 @@ struct safexcel_context_record {
 #define EIP197_XCM_MODE_CCM			2
 
 #define EIP197_AEAD_TYPE_IPSEC_ESP		2
-#define EIP197_AEAD_TYPE_IPSEC_ESP_GMAC		3
+#define EIP197_AEAD_TYPE_IPSEC_ESP_GMAC		3 /* 2 + 1 */
+#define EIP197_AEAD_TYPE_IPSEC_CTR		6 /* 2 + 4 */
 #define EIP197_AEAD_IPSEC_IV_SIZE		8
 #define EIP197_AEAD_IPSEC_NONCE_SIZE		4
 #define EIP197_AEAD_IPSEC_COUNTER_SIZE		4
@@ -518,6 +520,25 @@ struct safexcel_result_desc {
 	u32 data_hi;
 } __packed;
 
+/* Build basic command OR result descriptor */
+static inline void build_desc(void *desc, u32 particle_size, u32 first_seg,
+			      u32 last_seg, u32 extra_size, dma_addr_t data)
+{
+	*(u64 *)desc = cpu_to_le64(particle_size | (last_seg << 22) |
+				   (first_seg << 23) | (extra_size << 24));
+	desc += sizeof(u64);
+	*(u64 *)desc = cpu_to_le64(data);
+}
+
+/* Modify descriptor by OR-ing into the first, last or extra_size fields */
+static inline void upd_desc_set(void *desc, u32 first_seg, u32 last_seg,
+				u32 extra_size)
+{
+	*(u32 *)desc = cpu_to_le32(le32_to_cpu(*(u32 *)desc) |
+				   (last_seg << 22) | (first_seg << 23) |
+				   (extra_size << 24));
+}
+
 /*
  * The EIP(1)97 only needs to fetch the descriptor part of
  * the result descriptor, not the result token part!
@@ -540,8 +561,10 @@ struct safexcel_token {
 #define EIP197_TOKEN_DIRECTION_EXTERNAL		BIT(11)
 #define EIP197_TOKEN_EXEC_IF_SUCCESSFUL		(0x1 << 12)
 
+#define EIP197_TOKEN_LENGTH_MASK		GENMASK(16, 0)
 #define EIP197_TOKEN_STAT_LAST_HASH		BIT(0)
 #define EIP197_TOKEN_STAT_LAST_PACKET		BIT(1)
+#define EIP197_TOKEN_STAT_BOTH			GENMASK(1, 0)
 #define EIP197_TOKEN_OPCODE_DIRECTION		0x0
 #define EIP197_TOKEN_OPCODE_INSERT		0x2
 #define EIP197_TOKEN_OPCODE_NOOP		EIP197_TOKEN_OPCODE_INSERT
@@ -551,12 +574,33 @@ struct safexcel_token {
 #define EIP197_TOKEN_OPCODE_CTX_ACCESS		0xe
 #define EIP197_TOKEN_OPCODE_BYPASS		GENMASK(3, 0)
 
+/* Build instruction from individual fields assumed to be in legal range */
+static inline void build_instr(struct safexcel_token *token, u32 opcode,
+			       u32 packet_length, u32 stat, u32 instructions)
+{
+	*(u32 *)token = cpu_to_le32(packet_length | (stat << 17) |
+				    (instructions << 19) | (opcode << 28));
+}
+
+/* Modify instruction by OR-ing into the stat and/or instruction fields */
+static inline void upd_instr_set(struct safexcel_token *token, u32 stat,
+				 u32 instructions)
+{
+	*(u32 *)token = cpu_to_le32(le32_to_cpu(*(u32 *)token) |
+				    (stat << 17) | (instructions << 19));
+}
+
+/* Modify instruction by AND-ing into the stat and/or instruction fields */
+static inline void upd_instr_clr(struct safexcel_token *token, u32 stat,
+				 u32 instructions)
+{
+	*(u32 *)token = cpu_to_le32(le32_to_cpu(*(u32 *)token) &
+				    ~(stat << 17) & ~(instructions << 19));
+}
+
 static inline void eip197_noop_token(struct safexcel_token *token)
 {
-	token->opcode = EIP197_TOKEN_OPCODE_NOOP;
-	token->packet_length = BIT(2);
-	token->stat = 0;
-	token->instructions = 0;
+	build_instr(token, EIP197_TOKEN_OPCODE_NOOP, 4, 0, 0);
 }
 
 /* Instructions */
@@ -567,6 +611,7 @@ static inline void eip197_noop_token(struct safexcel_token *token)
 #define EIP197_TOKEN_INS_TYPE_OUTPUT		BIT(5)
 #define EIP197_TOKEN_INS_TYPE_HASH		BIT(6)
 #define EIP197_TOKEN_INS_TYPE_CRYPTO		BIT(7)
+#define EIP197_TOKEN_INS_TYPE_ALL		GENMASK(7, 5)
 #define EIP197_TOKEN_INS_LAST			BIT(8)
 
 /* Processing Engine Control Data  */
@@ -581,11 +626,34 @@ struct safexcel_control_data_desc {
 	u32 context_lo;
 	u32 context_hi;
 
-	u32 control0;
-	u32 control1;
+	u64 control;
 
 	u32 token[EIP197_EMB_TOKENS];
 } __packed;
+
+/* Build EIP96 token hdr from individual fields assumed to be in legal range */
+static inline void build_tokhdr(void *tokhdr, u32 packet_length, u32 options,
+				u32 type, dma_addr_t context)
+{
+	*(u64 *)tokhdr = cpu_to_le64(packet_length | (options << 17) |
+				     (type << 30));
+	tokhdr += sizeof(u64);
+	*(u64 *)tokhdr = cpu_to_le64(context);
+}
+
+/* Modify EIP96 token hdr by OR-ing into the options and type fields */
+static inline void upd_tokhdr_set(void *tokhdr, u32 options, u32 type)
+{
+	*(u32 *)tokhdr = cpu_to_le32(le32_to_cpu(*(u32 *)tokhdr) |
+				     (options << 17) | (type << 30));
+}
+
+/* Modify EIP96 token hdr by AND-ing into the options and type fields */
+static inline void upd_tokhdr_clr(void *tokhdr, u32 options, u32 type)
+{
+	*(u32 *)tokhdr = cpu_to_le32(le32_to_cpu(*(u32 *)tokhdr) &
+				     ~(options << 17) & ~(type << 30));
+}
 
 #define EIP197_OPTION_MAGIC_VALUE	BIT(0)
 #define EIP197_OPTION_64BIT_CTX		BIT(1)
@@ -593,6 +661,7 @@ struct safexcel_control_data_desc {
 #define EIP197_OPTION_CTX_CTRL_IN_CMD	BIT(8)
 #define EIP197_OPTION_2_TOKEN_IV_CMD	GENMASK(11, 10)
 #define EIP197_OPTION_4_TOKEN_IV_CMD	GENMASK(11, 9)
+#define EIP197_OPTION_ALL		GENMASK(12, 0)
 
 #define EIP197_TYPE_BCLA		0x0
 #define EIP197_TYPE_EXTENDED		0x3
@@ -719,7 +788,7 @@ enum safexcel_eip_version {
 };
 
 /* Priority we use for advertising our algorithms */
-#define SAFEXCEL_CRA_PRIORITY		300
+#define SAFEXCEL_CRA_PRIORITY		500
 
 /* SM3 digest result for zero length message */
 #define EIP197_SM3_ZEROM_HASH	"\x1A\xB2\x1D\x83\x55\xCF\xA1\x7F" \

@@ -80,28 +80,19 @@ static void safexcel_hash_token(struct safexcel_command_desc *cdesc,
 	struct safexcel_token *token =
 		(struct safexcel_token *)cdesc->control_data.token;
 
-	token[0].opcode = EIP197_TOKEN_OPCODE_DIRECTION;
-	token[0].packet_length = input_length;
-	token[0].instructions = EIP197_TOKEN_INS_TYPE_HASH;
+	/* buildinstr(*token, opcode, length, stat, flags) */
+	build_instr(&token[0], EIP197_TOKEN_OPCODE_DIRECTION,
+		    input_length & EIP197_TOKEN_LENGTH_MASK, 0,
+		    EIP197_TOKEN_INS_TYPE_HASH);
 
-	input_length &= 15;
-	if (unlikely(cbcmac && input_length)) {
-		token[0].stat =  0;
-		token[1].opcode = EIP197_TOKEN_OPCODE_INSERT;
-		token[1].packet_length = 16 - input_length;
-		token[1].stat = EIP197_TOKEN_STAT_LAST_HASH;
-		token[1].instructions = EIP197_TOKEN_INS_TYPE_HASH;
-	} else {
-		token[0].stat = EIP197_TOKEN_STAT_LAST_HASH;
-		eip197_noop_token(&token[1]);
-	}
+	build_instr(&token[1], EIP197_TOKEN_OPCODE_INSERT,
+		    (-input_length) & 15, EIP197_TOKEN_STAT_LAST_HASH,
+		    cbcmac * EIP197_TOKEN_INS_TYPE_HASH);
 
-	token[2].opcode = EIP197_TOKEN_OPCODE_INSERT;
-	token[2].stat = EIP197_TOKEN_STAT_LAST_HASH |
-			EIP197_TOKEN_STAT_LAST_PACKET;
-	token[2].packet_length = result_length;
-	token[2].instructions = EIP197_TOKEN_INS_TYPE_OUTPUT |
-				EIP197_TOKEN_INS_INSERT_HASH_DIGEST;
+	build_instr(&token[2], EIP197_TOKEN_OPCODE_INSERT,
+		    result_length, EIP197_TOKEN_STAT_BOTH,
+		    EIP197_TOKEN_INS_TYPE_OUTPUT |
+		    EIP197_TOKEN_INS_INSERT_HASH_DIGEST);
 
 	eip197_noop_token(&token[3]);
 }
@@ -113,8 +104,7 @@ static void safexcel_context_control(struct safexcel_ahash_ctx *ctx,
 	struct safexcel_crypto_priv *priv = ctx->priv;
 	u64 count = 0;
 
-	cdesc->control_data.control0 = ctx->alg;
-	cdesc->control_data.control1 = 0;
+	cdesc->control_data.control = cpu_to_le64(ctx->alg);
 
 	/*
 	 * Copy the input digest if needed, and setup the context
@@ -128,34 +118,36 @@ static void safexcel_context_control(struct safexcel_ahash_ctx *ctx,
 			memcpy(ctx->base.ctxr->data, req->state, req->state_sz);
 
 		if (!req->finish && req->xcbcmac)
-			cdesc->control_data.control0 |=
+			cdesc->control_data.control |= cpu_to_le64(
 				CONTEXT_CONTROL_DIGEST_XCM |
 				CONTEXT_CONTROL_TYPE_HASH_OUT  |
 				CONTEXT_CONTROL_NO_FINISH_HASH |
 				CONTEXT_CONTROL_SIZE(req->state_sz /
-						     sizeof(u32));
+						     sizeof(u32)));
 		else
-			cdesc->control_data.control0 |=
+			cdesc->control_data.control |= cpu_to_le64(
 				CONTEXT_CONTROL_DIGEST_XCM |
 				CONTEXT_CONTROL_TYPE_HASH_OUT  |
 				CONTEXT_CONTROL_SIZE(req->state_sz /
-						     sizeof(u32));
+						     sizeof(u32)));
 		return;
 	} else if (!req->processed) {
 		/* First - and possibly only - block of basic hash only */
 		if (req->finish)
-			cdesc->control_data.control0 |= req->digest |
+			cdesc->control_data.control |= cpu_to_le64(
+				req->digest |
 				CONTEXT_CONTROL_TYPE_HASH_OUT |
 				CONTEXT_CONTROL_RESTART_HASH  |
 				/* ensure its not 0! */
-				CONTEXT_CONTROL_SIZE(1);
+				CONTEXT_CONTROL_SIZE(1));
 		else
-			cdesc->control_data.control0 |= req->digest |
+			cdesc->control_data.control |= cpu_to_le64(
+				req->digest |
 				CONTEXT_CONTROL_TYPE_HASH_OUT  |
 				CONTEXT_CONTROL_RESTART_HASH   |
 				CONTEXT_CONTROL_NO_FINISH_HASH |
 				/* ensure its not 0! */
-				CONTEXT_CONTROL_SIZE(1);
+				CONTEXT_CONTROL_SIZE(1));
 		return;
 	}
 
@@ -186,16 +178,15 @@ static void safexcel_context_control(struct safexcel_ahash_ctx *ctx,
 		    /* PE HW < 4.4 cannot do HMAC continue, fake using hash */
 		    (req->processed != req->block_sz)) {
 			/* Basic hash continue operation, need digest + cnt */
-			cdesc->control_data.control0 |=
+			cdesc->control_data.control |= cpu_to_le64(
 				CONTEXT_CONTROL_SIZE((req->state_sz >> 2) + 1) |
 				CONTEXT_CONTROL_TYPE_HASH_OUT |
-				CONTEXT_CONTROL_DIGEST_PRECOMPUTED;
+				CONTEXT_CONTROL_DIGEST_PRECOMPUTED |
+				CONTEXT_CONTROL_DIGEST_CNT << 32);
 			/* For zero-len HMAC, don't finalize, already padded! */
 			if (req->hmac_zlen)
-				cdesc->control_data.control0 |=
-					CONTEXT_CONTROL_NO_FINISH_HASH;
-			cdesc->control_data.control1 |=
-				CONTEXT_CONTROL_DIGEST_CNT;
+				cdesc->control_data.control |= cpu_to_le64(
+					CONTEXT_CONTROL_NO_FINISH_HASH);
 			ctx->base.ctxr->data[req->state_sz >> 2] =
 				cpu_to_le32(count);
 			req->digest = CONTEXT_CONTROL_DIGEST_PRECOMPUTED;
@@ -208,17 +199,17 @@ static void safexcel_context_control(struct safexcel_ahash_ctx *ctx,
 			       ctx->opad, req->state_sz);
 
 			/* Single pass HMAC - no digest count */
-			cdesc->control_data.control0 |=
+			cdesc->control_data.control |= cpu_to_le64(
 				CONTEXT_CONTROL_SIZE(req->state_sz >> 1) |
 				CONTEXT_CONTROL_TYPE_HASH_OUT |
-				CONTEXT_CONTROL_DIGEST_HMAC;
+				CONTEXT_CONTROL_DIGEST_HMAC);
 		}
 	} else { /* Hash continuation, do not finish yet */
-		cdesc->control_data.control0 |=
+		cdesc->control_data.control |= cpu_to_le64(
 			CONTEXT_CONTROL_SIZE(req->state_sz >> 2) |
 			CONTEXT_CONTROL_DIGEST_PRECOMPUTED |
 			CONTEXT_CONTROL_TYPE_HASH_OUT |
-			CONTEXT_CONTROL_NO_FINISH_HASH;
+			CONTEXT_CONTROL_NO_FINISH_HASH);
 	}
 }
 
@@ -402,8 +393,8 @@ static int safexcel_ahash_send_req(struct crypto_async_request *async, int ring,
 		first_cdesc = safexcel_add_cdesc(priv, ring, 1,
 						 (cache_len == len),
 						 req->cache_dma, cache_len,
-						 len, ctx->base.ctxr_dma,
-						 &dmmy);
+						 len, ctx->base.ctxr_dma |
+						 EIP197_CONTEXT_SMALL, &dmmy);
 		if (IS_ERR(first_cdesc)) {
 			ret = PTR_ERR(first_cdesc);
 			goto unmap_cache;
@@ -442,7 +433,8 @@ static int safexcel_ahash_send_req(struct crypto_async_request *async, int ring,
 		cdesc = safexcel_add_cdesc(priv, ring, !n_cdesc,
 					   !(queued - sglen),
 					   sg_dma_address(sg) + skip, sglen,
-					   len, ctx->base.ctxr_dma, &dmmy);
+					   len, ctx->base.ctxr_dma |
+					   EIP197_CONTEXT_SMALL, &dmmy);
 		if (IS_ERR(cdesc)) {
 			ret = PTR_ERR(cdesc);
 			goto unmap_sg;

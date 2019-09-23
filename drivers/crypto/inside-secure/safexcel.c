@@ -982,10 +982,9 @@ int safexcel_invalidate_cache(struct crypto_async_request *async,
 	if (IS_ERR(cdesc))
 		return PTR_ERR(cdesc);
 
-	cdesc->control_data.type = EIP197_TYPE_EXTENDED;
-	cdesc->control_data.options = 0;
-	cdesc->control_data.context_lo &= ~EIP197_CONTEXT_SIZE_MASK;
-	cdesc->control_data.control0 = CONTEXT_CONTROL_INV_TR;
+	upd_tokhdr_set(&cdesc->control_data, 0, EIP197_TYPE_EXTENDED);
+	upd_tokhdr_clr(&cdesc->control_data, EIP197_OPTION_ALL, 0);
+	cdesc->control_data.control = cpu_to_le64(CONTEXT_CONTROL_INV_TR);
 
 	/* Prepare result descriptor */
 	rdesc = safexcel_add_rdesc(priv, ring, true, true, 0, 0);

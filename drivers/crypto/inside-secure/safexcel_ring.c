@@ -191,32 +191,23 @@ struct safexcel_command_desc *safexcel_add_cdesc(struct safexcel_crypto_priv *pr
 	if (IS_ERR(cdesc))
 		return cdesc;
 
-	cdesc->particle_size = data_len;
-	cdesc->rsvd0 = 0;
-	cdesc->last_seg = last;
-	cdesc->first_seg = first;
-	cdesc->additional_cdata_size = 0;
-	cdesc->rsvd1 = 0;
-	cdesc->data_lo = lower_32_bits(data);
-	cdesc->data_hi = upper_32_bits(data);
+	/* build_desc(*desc, partsize, first, last, extrasize, data) */
+	build_desc(cdesc, data_len, first, last, 0, data);
 
-	if (first) {
+	if (first)
 		/*
 		 * Note that the length here MUST be >0 or else the EIP(1)97
 		 * may hang. Newer EIP197 firmware actually incorporates this
 		 * fix already, but that doesn't help the EIP97 and we may
 		 * also be running older firmware.
 		 */
-		cdesc->control_data.packet_length = full_data_len ?: 1;
-		cdesc->control_data.options = EIP197_OPTION_MAGIC_VALUE |
-					      EIP197_OPTION_64BIT_CTX |
-					      EIP197_OPTION_CTX_CTRL_IN_CMD |
-					      EIP197_OPTION_RC_AUTO;
-		cdesc->control_data.type = EIP197_TYPE_BCLA;
-		cdesc->control_data.context_lo = lower_32_bits(context) |
-						 EIP197_CONTEXT_SMALL;
-		cdesc->control_data.context_hi = upper_32_bits(context);
-	}
+		/* build_tokhdr(*tokhdr, packet_length, options, type, ctxt) */
+		build_tokhdr(&cdesc->control_data, full_data_len ?: 1,
+			     EIP197_OPTION_MAGIC_VALUE |
+			     EIP197_OPTION_64BIT_CTX |
+			     EIP197_OPTION_CTX_CTRL_IN_CMD |
+			     EIP197_OPTION_RC_AUTO,
+			     EIP197_TYPE_BCLA, context);
 
 	return cdesc;
 }
@@ -234,16 +225,8 @@ struct safexcel_result_desc *safexcel_add_rdesc(struct safexcel_crypto_priv *pri
 	if (IS_ERR(rdesc))
 		return rdesc;
 
-	rdesc->particle_size = len;
-	rdesc->rsvd0 = 0;
-	rdesc->descriptor_overflow = 0;
-	rdesc->buffer_overflow = 0;
-	rdesc->last_seg = last;
-	rdesc->first_seg = first;
-	rdesc->result_size = EIP197_RD64_RESULT_SIZE;
-	rdesc->rsvd1 = 0;
-	rdesc->data_lo = lower_32_bits(data);
-	rdesc->data_hi = upper_32_bits(data);
+	/* build_desc(*desc, partsize, first, last, extrasize, data) */
+	build_desc(rdesc, len, first, last, EIP197_RD64_RESULT_SIZE, data);
 
 	/* Clear length & error code in result token */
 	rtoken->packet_length = 0;
