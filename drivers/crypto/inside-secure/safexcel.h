@@ -926,8 +926,8 @@ struct safexcel_inv_result {
 };
 
 void safexcel_dequeue(struct safexcel_crypto_priv *priv, int ring);
-int safexcel_rdesc_check_errors(struct safexcel_crypto_priv *priv,
-				void *rdp);
+int safexcel_rdesc_report_errors(struct safexcel_crypto_priv *priv,
+				 void *rdp);
 void safexcel_complete(struct safexcel_crypto_priv *priv, int ring);
 int safexcel_invalidate_cache(struct crypto_async_request *async,
 			      struct safexcel_crypto_priv *priv,
@@ -966,6 +966,21 @@ safexcel_rdr_req_get(struct safexcel_crypto_priv *priv, int ring);
 void safexcel_inv_complete(struct crypto_async_request *req, int error);
 int safexcel_hmac_setkey(const char *alg, const u8 *key, unsigned int keylen,
 			 void *istate, void *ostate);
+
+static inline int safexcel_rdesc_check_errors(struct safexcel_crypto_priv *priv,
+					      void *rdp)
+{
+	struct safexcel_result_desc *rdesc = rdp;
+	struct result_data_desc *result_data = rdp + priv->config.res_offset;
+
+	if (likely(rdesc->last_seg &&
+		   (!rdesc->descriptor_overflow) &&
+		   (!rdesc->buffer_overflow) &&
+		   (!result_data->error_code)))
+		return 0;
+
+	return safexcel_rdesc_report_errors(priv, rdp);
+}
 
 /* available algorithms */
 extern struct safexcel_alg_template safexcel_alg_ecb_des;

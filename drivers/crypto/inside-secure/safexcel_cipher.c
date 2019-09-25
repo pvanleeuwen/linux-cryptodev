@@ -642,12 +642,9 @@ static int safexcel_handle_req_result(struct safexcel_crypto_priv *priv, int rin
 			*ret = PTR_ERR(rdesc);
 			break;
 		}
-
-		if (likely(!*ret))
-			*ret = safexcel_rdesc_check_errors(priv, rdesc);
-
 		ndesc++;
 	}
+	*ret = safexcel_rdesc_check_errors(priv, rdesc);
 
 	safexcel_complete(priv, ring);
 
@@ -925,12 +922,9 @@ static int safexcel_handle_inv_result(struct safexcel_crypto_priv *priv,
 			*ret = PTR_ERR(rdesc);
 			break;
 		}
-
-		if (likely(!*ret))
-			*ret = safexcel_rdesc_check_errors(priv, rdesc);
-
 		ndesc++;
 	}
+	*ret = safexcel_rdesc_check_errors(priv, rdesc);
 
 	safexcel_complete(priv, ring);
 

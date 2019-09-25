@@ -881,18 +881,16 @@ finalize:
 	       EIP197_HIA_CDR(priv, ring) + EIP197_HIA_xDR_PREP_COUNT);
 }
 
-inline int safexcel_rdesc_check_errors(struct safexcel_crypto_priv *priv,
-				       void *rdp)
+int safexcel_rdesc_report_errors(struct safexcel_crypto_priv *priv,
+				 void *rdp)
 {
 	struct safexcel_result_desc *rdesc = rdp;
 	struct result_data_desc *result_data = rdp + priv->config.res_offset;
 
-	if (likely((!rdesc->last_seg) || /* Rest only valid if last seg! */
-		   ((!rdesc->descriptor_overflow) &&
-		    (!rdesc->buffer_overflow) &&
-		    (!result_data->error_code))))
-		return 0;
-
+	if (!rdesc->last_seg) {
+		dev_err(priv->dev, "Last descriptor not tagged last");
+		return -EIO;
+	}
 	if (rdesc->descriptor_overflow)
 		dev_err(priv->dev, "Descriptor overflow detected");
 
