@@ -229,7 +229,7 @@ static int safexcel_handle_req_result(struct safexcel_crypto_priv *priv,
 
 	*ret = 0;
 
-	rdesc = safexcel_ring_next_rptr(priv, &priv->ring[ring].rdr);
+	rdesc = safexcel_ring_next_rptr(&priv->ring[ring].rdr);
 	if (IS_ERR(rdesc)) {
 		dev_err(priv->dev,
 			"hash: result: could not retrieve the result descriptor\n");
@@ -306,6 +306,8 @@ static int safexcel_ahash_send_req(struct crypto_async_request *async, int ring,
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_crypto_priv *priv = ctx->priv;
+	struct safexcel_desc_ring *cdr = &priv->ring[ring].cdr;
+	struct safexcel_desc_ring *rdr = &priv->ring[ring].rdr;
 	struct safexcel_command_desc *cdesc, *first_cdesc = NULL;
 	struct safexcel_result_desc *rdesc;
 	struct scatterlist *sg;
@@ -390,8 +392,7 @@ static int safexcel_ahash_send_req(struct crypto_async_request *async, int ring,
 			return -EINVAL;
 
 		req->cache_sz = cache_len;
-		first_cdesc = safexcel_add_cdesc(priv, ring, 1,
-						 (cache_len == len),
+		first_cdesc = safexcel_add_cdesc(cdr, 1, (cache_len == len),
 						 req->cache_dma, cache_len,
 						 len, ctx->base.ctxr_dma |
 						 EIP197_CONTEXT_SMALL, &dmmy);
@@ -430,8 +431,7 @@ static int safexcel_ahash_send_req(struct crypto_async_request *async, int ring,
 		else
 			sglen -= skip;
 
-		cdesc = safexcel_add_cdesc(priv, ring, !n_cdesc,
-					   !(queued - sglen),
+		cdesc = safexcel_add_cdesc(cdr, !n_cdesc, !(queued - sglen),
 					   sg_dma_address(sg) + skip, sglen,
 					   len, ctx->base.ctxr_dma |
 					   EIP197_CONTEXT_SMALL, &dmmy);
@@ -465,8 +465,7 @@ send_command:
 	}
 
 	/* Add a result descriptor */
-	rdesc = safexcel_add_rdesc(priv, ring, 1, 1, req->result_dma,
-				   req->digest_sz);
+	rdesc = safexcel_add_rdesc(rdr, 1, 1, req->result_dma, req->digest_sz);
 	if (IS_ERR(rdesc)) {
 		ret = PTR_ERR(rdesc);
 		goto unmap_result;
@@ -490,7 +489,7 @@ unmap_sg:
 	}
 cdesc_rollback:
 	for (i = 0; i < n_cdesc; i++)
-		safexcel_ring_rollback_wptr(priv, &priv->ring[ring].cdr);
+		safexcel_ring_rollback_wptr(cdr);
 unmap_cache:
 	if (req->cache_dma) {
 		dma_unmap_single(priv->dev, req->cache_dma, req->cache_sz,
@@ -515,7 +514,7 @@ static int safexcel_handle_inv_result(struct safexcel_crypto_priv *priv,
 
 	*ret = 0;
 
-	rdesc = safexcel_ring_next_rptr(priv, &priv->ring[ring].rdr);
+	rdesc = safexcel_ring_next_rptr(&priv->ring[ring].rdr);
 	if (IS_ERR(rdesc)) {
 		dev_err(priv->dev,
 			"hash: invalidate: could not retrieve the result descriptor\n");

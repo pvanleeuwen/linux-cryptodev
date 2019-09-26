@@ -937,20 +937,15 @@ int safexcel_invalidate_cache(struct crypto_async_request *async,
 int safexcel_init_ring_descriptors(struct safexcel_crypto_priv *priv,
 				   struct safexcel_desc_ring *cdr,
 				   struct safexcel_desc_ring *rdr);
-void *safexcel_ring_next_rptr(struct safexcel_crypto_priv *priv,
-			      struct safexcel_desc_ring *ring);
-void *safexcel_ring_first_rptr(struct safexcel_crypto_priv *priv, int  ring);
-void safexcel_ring_rollback_wptr(struct safexcel_crypto_priv *priv,
-				 struct safexcel_desc_ring *ring);
-struct safexcel_command_desc *safexcel_add_cdesc(struct safexcel_crypto_priv *priv,
-						 int ring_id,
+void *safexcel_ring_next_rptr(struct safexcel_desc_ring *ring);
+void safexcel_ring_rollback_wptr(struct safexcel_desc_ring *ring);
+struct safexcel_command_desc *safexcel_add_cdesc(struct safexcel_desc_ring *ring,
 						 bool first, bool last,
 						 dma_addr_t data, u32 len,
 						 u32 full_data_len,
 						 dma_addr_t context,
 						 struct safexcel_token **atoken);
-struct safexcel_result_desc *safexcel_add_rdesc(struct safexcel_crypto_priv *priv,
-						 int ring_id,
+struct safexcel_result_desc *safexcel_add_rdesc(struct safexcel_desc_ring *ring,
 						bool first, bool last,
 						dma_addr_t data, u32 len);
 void safexcel_inv_complete(struct crypto_async_request *req, int error);

@@ -921,21 +921,6 @@ int safexcel_rdesc_report_errors(struct safexcel_crypto_priv *priv,
 	return -EINVAL;
 }
 
-void safexcel_complete(struct safexcel_crypto_priv *priv, int ring)
-{
-	struct safexcel_command_desc *cdesc;
-
-	/* Acknowledge the command descriptors */
-	do {
-		cdesc = safexcel_ring_next_rptr(priv, &priv->ring[ring].cdr);
-		if (IS_ERR(cdesc)) {
-			dev_err(priv->dev,
-				"Could not retrieve the command descriptor\n");
-			return;
-		}
-	} while (!cdesc->last_seg);
-}
-
 void safexcel_inv_complete(struct crypto_async_request *req, int error)
 {
 	struct safexcel_inv_result *result = req->data;
@@ -953,12 +938,13 @@ int safexcel_invalidate_cache(struct crypto_async_request *async,
 {
 	struct safexcel_command_desc *cdesc;
 	struct safexcel_result_desc *rdesc;
+	struct safexcel_desc_ring *cdr = &priv->ring[ring].cdr;
+	struct safexcel_desc_ring *rdr = &priv->ring[ring].rdr;
 	struct safexcel_token  *dmmy;
 	int ret = 0;
 
 	/* Prepare command descriptor */
-	cdesc = safexcel_add_cdesc(priv, ring, true, true, 0, 0, 0, ctxr_dma,
-				   &dmmy);
+	cdesc = safexcel_add_cdesc(cdr, true, true, 0, 0, 0, ctxr_dma, &dmmy);
 	if (IS_ERR(cdesc))
 		return PTR_ERR(cdesc);
 
@@ -967,7 +953,7 @@ int safexcel_invalidate_cache(struct crypto_async_request *async,
 	cdesc->control_data.control = cpu_to_le64(CONTEXT_CONTROL_INV_TR);
 
 	/* Prepare result descriptor */
-	rdesc = safexcel_add_rdesc(priv, ring, true, true, 0, 0);
+	rdesc = safexcel_add_rdesc(rdr, true, true, 0, 0);
 
 	if (IS_ERR(rdesc)) {
 		ret = PTR_ERR(rdesc);
@@ -979,7 +965,7 @@ int safexcel_invalidate_cache(struct crypto_async_request *async,
 	return ret;
 
 cdesc_rollback:
-	safexcel_ring_rollback_wptr(priv, &priv->ring[ring].cdr);
+	safexcel_ring_rollback_wptr(cdr);
 
 	return ret;
 }

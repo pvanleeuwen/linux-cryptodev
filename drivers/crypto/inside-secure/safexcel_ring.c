@@ -71,10 +71,9 @@ int safexcel_init_ring_descriptors(struct safexcel_crypto_priv *priv,
 	return 0;
 }
 
-static void *safexcel_ring_next_cwptr(struct safexcel_crypto_priv *priv,
-				     struct safexcel_desc_ring *ring,
-				     bool first,
-				     struct safexcel_token **atoken)
+static inline void *safexcel_ring_next_cwptr(struct safexcel_desc_ring *ring,
+					     bool first,
+					     struct safexcel_token **atoken)
 {
 	void *ptr = ring->write;
 
@@ -96,9 +95,8 @@ static void *safexcel_ring_next_cwptr(struct safexcel_crypto_priv *priv,
 	return ptr;
 }
 
-static void *safexcel_ring_next_rwptr(struct safexcel_crypto_priv *priv,
-				     struct safexcel_desc_ring *ring,
-				     struct result_data_desc **rtoken)
+static inline void *safexcel_ring_next_rwptr(struct safexcel_desc_ring *ring,
+					     struct result_data_desc **rtoken)
 {
 	void *ptr = ring->write;
 
@@ -117,8 +115,7 @@ static void *safexcel_ring_next_rwptr(struct safexcel_crypto_priv *priv,
 	return ptr;
 }
 
-void *safexcel_ring_next_rptr(struct safexcel_crypto_priv *priv,
-			      struct safexcel_desc_ring *ring)
+inline void *safexcel_ring_next_rptr(struct safexcel_desc_ring *ring)
 {
 	void *ptr = ring->read;
 
@@ -133,16 +130,22 @@ void *safexcel_ring_next_rptr(struct safexcel_crypto_priv *priv,
 	return ptr;
 }
 
-inline void *safexcel_ring_curr_rptr(struct safexcel_crypto_priv *priv,
-				     int ring)
+void safexcel_complete(struct safexcel_crypto_priv *priv, int ring)
 {
-	struct safexcel_desc_ring *rdr = &priv->ring[ring].rdr;
+	struct safexcel_command_desc *cdesc;
 
-	return rdr->read;
+	/* Acknowledge the command descriptors */
+	do {
+		cdesc = safexcel_ring_next_rptr(&priv->ring[ring].cdr);
+		if (IS_ERR(cdesc)) {
+			dev_err(priv->dev,
+				"Could not retrieve the command descriptor\n");
+			return;
+		}
+	} while (!cdesc->last_seg);
 }
 
-void safexcel_ring_rollback_wptr(struct safexcel_crypto_priv *priv,
-				 struct safexcel_desc_ring *ring)
+void safexcel_ring_rollback_wptr(struct safexcel_desc_ring *ring)
 {
 	if (ring->write == ring->read)
 		return;
@@ -156,8 +159,7 @@ void safexcel_ring_rollback_wptr(struct safexcel_crypto_priv *priv,
 	}
 }
 
-struct safexcel_command_desc *safexcel_add_cdesc(struct safexcel_crypto_priv *priv,
-						 int ring_id,
+struct safexcel_command_desc *safexcel_add_cdesc(struct safexcel_desc_ring *ring,
 						 bool first, bool last,
 						 dma_addr_t data, u32 data_len,
 						 u32 full_data_len,
@@ -166,8 +168,7 @@ struct safexcel_command_desc *safexcel_add_cdesc(struct safexcel_crypto_priv *pr
 {
 	struct safexcel_command_desc *cdesc;
 
-	cdesc = safexcel_ring_next_cwptr(priv, &priv->ring[ring_id].cdr,
-					 first, atoken);
+	cdesc = safexcel_ring_next_cwptr(ring, first, atoken);
 	if (IS_ERR(cdesc))
 		return cdesc;
 
@@ -192,16 +193,14 @@ struct safexcel_command_desc *safexcel_add_cdesc(struct safexcel_crypto_priv *pr
 	return cdesc;
 }
 
-struct safexcel_result_desc *safexcel_add_rdesc(struct safexcel_crypto_priv *priv,
-						int ring_id,
+struct safexcel_result_desc *safexcel_add_rdesc(struct safexcel_desc_ring *ring,
 						bool first, bool last,
 						dma_addr_t data, u32 len)
 {
 	struct safexcel_result_desc *rdesc;
 	struct result_data_desc *rtoken;
 
-	rdesc = safexcel_ring_next_rwptr(priv, &priv->ring[ring_id].rdr,
-					 &rtoken);
+	rdesc = safexcel_ring_next_rwptr(ring, &rtoken);
 	if (IS_ERR(rdesc))
 		return rdesc;
 
