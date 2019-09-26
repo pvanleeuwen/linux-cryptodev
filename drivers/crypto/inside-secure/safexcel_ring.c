@@ -57,6 +57,8 @@ int safexcel_init_ring_descriptors(struct safexcel_crypto_priv *priv,
 	rdr->offset = priv->config.rd_offset;
 	/* Use shoffset for result token offset here */
 	rdr->shoffset = priv->config.res_offset;
+	/* rd_offset is an integer power of 2, get that power here */
+	rdr->offsshft = __fls(priv->config.rd_offset);
 	rdr->base = dmam_alloc_coherent(priv->dev,
 					rdr->offset * EIP197_DEFAULT_RING_SIZE,
 					&rdr->base_dma, GFP_KERNEL);
@@ -67,11 +69,6 @@ int safexcel_init_ring_descriptors(struct safexcel_crypto_priv *priv,
 	rdr->read = rdr->base;
 
 	return 0;
-}
-
-inline int safexcel_select_ring(struct safexcel_crypto_priv *priv)
-{
-	return (atomic_inc_return(&priv->ring_used) % priv->config.rings);
 }
 
 static void *safexcel_ring_next_cwptr(struct safexcel_crypto_priv *priv,
@@ -142,23 +139,6 @@ inline void *safexcel_ring_curr_rptr(struct safexcel_crypto_priv *priv,
 	struct safexcel_desc_ring *rdr = &priv->ring[ring].rdr;
 
 	return rdr->read;
-}
-
-inline int safexcel_ring_first_rdr_index(struct safexcel_crypto_priv *priv,
-					 int ring)
-{
-	struct safexcel_desc_ring *rdr = &priv->ring[ring].rdr;
-
-	return (rdr->read - rdr->base) / rdr->offset;
-}
-
-inline int safexcel_ring_rdr_rdesc_index(struct safexcel_crypto_priv *priv,
-					 int ring,
-					 struct safexcel_result_desc *rdesc)
-{
-	struct safexcel_desc_ring *rdr = &priv->ring[ring].rdr;
-
-	return ((void *)rdesc - rdr->base) / rdr->offset;
 }
 
 void safexcel_ring_rollback_wptr(struct safexcel_crypto_priv *priv,

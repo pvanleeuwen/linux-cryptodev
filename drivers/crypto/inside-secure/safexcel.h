@@ -721,6 +721,7 @@ struct safexcel_desc_ring {
 	/* descriptor element offset */
 	unsigned int offset;
 	unsigned int shoffset;
+	unsigned int offsshft;
 };
 
 enum safexcel_alg_type {
@@ -732,6 +733,7 @@ enum safexcel_alg_type {
 struct safexcel_config {
 	u32 pes;
 	u32 rings;
+	u32 ringmsk;
 
 	u32 cd_size;
 	u32 cd_offset;
@@ -935,7 +937,6 @@ int safexcel_invalidate_cache(struct crypto_async_request *async,
 int safexcel_init_ring_descriptors(struct safexcel_crypto_priv *priv,
 				   struct safexcel_desc_ring *cdr,
 				   struct safexcel_desc_ring *rdr);
-int safexcel_select_ring(struct safexcel_crypto_priv *priv);
 void *safexcel_ring_next_rptr(struct safexcel_crypto_priv *priv,
 			      struct safexcel_desc_ring *ring);
 void *safexcel_ring_first_rptr(struct safexcel_crypto_priv *priv, int  ring);
@@ -952,17 +953,6 @@ struct safexcel_result_desc *safexcel_add_rdesc(struct safexcel_crypto_priv *pri
 						 int ring_id,
 						bool first, bool last,
 						dma_addr_t data, u32 len);
-int safexcel_ring_first_rdr_index(struct safexcel_crypto_priv *priv,
-				  int ring);
-int safexcel_ring_rdr_rdesc_index(struct safexcel_crypto_priv *priv,
-				  int ring,
-				  struct safexcel_result_desc *rdesc);
-void safexcel_rdr_req_set(struct safexcel_crypto_priv *priv,
-			  int ring,
-			  struct safexcel_result_desc *rdesc,
-			  struct crypto_async_request *req);
-inline struct crypto_async_request *
-safexcel_rdr_req_get(struct safexcel_crypto_priv *priv, int ring);
 void safexcel_inv_complete(struct crypto_async_request *req, int error);
 int safexcel_hmac_setkey(const char *alg, const u8 *key, unsigned int keylen,
 			 void *istate, void *ostate);
@@ -980,6 +970,31 @@ static inline int safexcel_rdesc_check_errors(struct safexcel_crypto_priv *priv,
 		return 0;
 
 	return safexcel_rdesc_report_errors(priv, rdp);
+}
+
+static inline int safexcel_select_ring(struct safexcel_crypto_priv *priv)
+{
+	return (atomic_inc_return(&priv->ring_used) & priv->config.ringmsk);
+}
+
+static inline void safexcel_rdr_req_set(struct safexcel_crypto_priv *priv,
+					int ring,
+					struct safexcel_result_desc *rdesc,
+					struct crypto_async_request *req)
+{
+	struct safexcel_desc_ring *rdr = &priv->ring[ring].rdr;
+	int i =  ((void *)rdesc - rdr->base) >> rdr->offsshft;
+
+	priv->ring[ring].rdr_req[i] = req;
+}
+
+static inline struct crypto_async_request *
+safexcel_rdr_req_get(struct safexcel_crypto_priv *priv, int ring)
+{
+	struct safexcel_desc_ring *rdr = &priv->ring[ring].rdr;
+	int i = (rdr->read - rdr->base) >> rdr->offsshft;
+
+	return priv->ring[ring].rdr_req[i];
 }
 
 /* available algorithms */

@@ -26,7 +26,7 @@
 
 static u32 max_rings = EIP197_MAX_RINGS;
 module_param(max_rings, uint, 0644);
-MODULE_PARM_DESC(max_rings, "Maximum number of rings to use.");
+MODULE_PARM_DESC(max_rings, "Maximum number of rings to use (power of 2).");
 
 static void eip197_trc_cache_setupvirt(struct safexcel_crypto_priv *priv)
 {
@@ -921,24 +921,6 @@ int safexcel_rdesc_report_errors(struct safexcel_crypto_priv *priv,
 	return -EINVAL;
 }
 
-inline void safexcel_rdr_req_set(struct safexcel_crypto_priv *priv,
-				 int ring,
-				 struct safexcel_result_desc *rdesc,
-				 struct crypto_async_request *req)
-{
-	int i = safexcel_ring_rdr_rdesc_index(priv, ring, rdesc);
-
-	priv->ring[ring].rdr_req[i] = req;
-}
-
-inline struct crypto_async_request *
-safexcel_rdr_req_get(struct safexcel_crypto_priv *priv, int ring)
-{
-	int i = safexcel_ring_first_rdr_index(priv, ring);
-
-	return priv->ring[ring].rdr_req[i];
-}
-
 void safexcel_complete(struct safexcel_crypto_priv *priv, int ring)
 {
 	struct safexcel_command_desc *cdesc;
@@ -1318,12 +1300,17 @@ static void safexcel_unregister_algorithms(struct safexcel_crypto_priv *priv)
 static void safexcel_configure(struct safexcel_crypto_priv *priv)
 {
 	u32 mask = BIT(priv->hwconfig.hwdataw) - 1;
+	u32 tmp;
 
 	priv->config.pes = priv->hwconfig.hwnumpes;
-	priv->config.rings = min_t(u32, priv->hwconfig.hwnumrings, max_rings);
+	/* Select minimum of available rings and desired max_rings */
+	tmp = min_t(u32, priv->hwconfig.hwnumrings, max_rings);
 	/* Cannot currently support more rings than we have ring AICs! */
-	priv->config.rings = min_t(u32, priv->config.rings,
-					priv->hwconfig.hwnumraic);
+	tmp = min_t(u32, tmp, priv->hwconfig.hwnumraic);
+	/* Round down to nearest power of 2 and create mask wrapping */
+	tmp = 1 << __fls(tmp);
+	priv->config.rings = tmp;
+	priv->config.ringmsk = tmp - 1;
 
 	priv->config.cd_size = EIP197_CD64_FETCH_SIZE;
 	priv->config.cd_offset = (priv->config.cd_size + mask) & ~mask;
@@ -1334,7 +1321,16 @@ static void safexcel_configure(struct safexcel_crypto_priv *priv)
 	/* now the size of the descr is this 1st part plus the result struct */
 	priv->config.rd_size    = priv->config.res_offset +
 				  EIP197_RD64_RESULT_SIZE;
-	priv->config.rd_offset = (priv->config.rd_size + mask) & ~mask;
+	/*
+	 * Round size up to next higher power of 2 for offset.
+	 * This also guarantees it to be an integer multiple of the buswidth.
+	 * (and will usually make it a multiple of the cacheline size as well)
+	 */
+	tmp = 1 << __fls(priv->config.rd_size);
+	if (tmp == priv->config.rd_size)
+		priv->config.rd_offset = tmp;
+	else
+		priv->config.rd_offset = tmp * 2;
 
 	/* convert dwords to bytes */
 	priv->config.cd_offset *= sizeof(u32);
