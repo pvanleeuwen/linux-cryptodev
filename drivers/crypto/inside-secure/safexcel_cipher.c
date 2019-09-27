@@ -340,6 +340,13 @@ inline void safexcel_gen_aead_token(struct safexcel_cipher_ctx *ctx, u8 *iv,
 
 			/* Do not send cdata to crypt engine in case of GMAC */
 			cryptflags &= ~EIP197_TOKEN_INS_TYPE_CRYPTO;
+		} else if (unlikely(!cryptlen)) {
+			/* Needed for older HW only ... */
+			upd_instr_set(aadtok, EIP197_TOKEN_STAT_LAST_HASH, 0);
+			eip197_noop_token(atoken);
+			atoken++;
+			atoksize++;
+			goto skip_crypt;
 		}
 	}
 process_crypt:
