@@ -334,6 +334,11 @@ inline void safexcel_gen_aead_token(struct safexcel_cipher_ctx *ctx, u8 *iv,
 		safexcel_ency0_token(atoken);
 		atoken += 2;
 		atoksize += 2;
+		if (unlikely(!cryptlen)) {
+			/* Needed for older HW only ... */
+			upd_instr_set(aadtok, EIP197_TOKEN_STAT_LAST_HASH, 0);
+			goto skip_crypt;
+		}
 		if (unlikely(ctx->aead == EIP197_AEAD_TYPE_IPSEC_ESP_GMAC)) {
 			/* Clear LAST bit in ins field of AAD dir instruction */
 			upd_instr_clr(aadtok, 0, EIP197_TOKEN_INS_LAST);
