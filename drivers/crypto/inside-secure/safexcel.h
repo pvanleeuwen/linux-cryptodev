@@ -44,6 +44,7 @@
 #define EIP197_MAX_TOKENS			16
 #define EIP197_MAX_RINGS			4
 #define EIP197_FETCH_DEPTH			2
+/* Higher values (max is 65535) reduce CPU load, but are worse for latency */
 #define EIP197_MAX_BATCH_SZ			64
 #define EIP197_MAX_RING_AIC			14
 
@@ -769,6 +770,7 @@ struct safexcel_ring {
 
 	/* Number of requests in the engine. */
 	int requests;
+	int thresh_written;
 
 	/* The ring is currently handling at least one request */
 	bool busy;
