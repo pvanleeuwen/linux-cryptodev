@@ -642,7 +642,7 @@ static int safexcel_handle_req_result(struct safexcel_crypto_priv *priv, int rin
 		return 0;
 
 	while (sreq->rdescs--) {
-		rdesc = safexcel_ring_next_rptr(&priv->ring[ring].rdr);
+		rdesc = safexcel_rdr_next_rptr(&priv->ring[ring].rdr);
 		if (IS_ERR(rdesc)) {
 			dev_err(priv->dev,
 				"cipher: result: could not retrieve the result descriptor\n");
@@ -814,6 +814,11 @@ static int safexcel_send_req(struct crypto_async_request *base, int ring,
 		first_cdesc = safexcel_add_cdesc(cdr, 1, 1, 0, 0, totlen,
 						 ctx->base.ctxr_dma |
 						 EIP197_CONTEXT_SMALL, &atoken);
+		if (IS_ERR(first_cdesc)) {
+			/* No space left in the command descriptor ring */
+			ret = PTR_ERR(first_cdesc);
+			goto unmap_sg_buffers;
+		}
 		n_cdesc = 1;
 	}
 
@@ -878,7 +883,7 @@ static int safexcel_send_req(struct crypto_async_request *base, int ring,
 		if (IS_ERR(rdesc)) {
 			/* No space left in the result descriptor ring */
 			ret = PTR_ERR(rdesc);
-			goto rdesc_rollback;
+			goto cdesc_rollback;
 		}
 		first_rdesc = rdesc;
 		n_rdesc = 1;
@@ -896,7 +901,7 @@ rdesc_rollback:
 cdesc_rollback:
 	for (i = 0; i < n_cdesc; i++)
 		safexcel_ring_rollback_wptr(cdr);
-
+unmap_sg_buffers:
 	if (src == dst) {
 		dma_unmap_sg(priv->dev, src, sreq->nr_src, DMA_BIDIRECTIONAL);
 	} else {
@@ -923,7 +928,7 @@ static int safexcel_handle_inv_result(struct safexcel_crypto_priv *priv,
 		return 0;
 
 	while (sreq->rdescs--) {
-		rdesc = safexcel_ring_next_rptr(&priv->ring[ring].rdr);
+		rdesc = safexcel_rdr_next_rptr(&priv->ring[ring].rdr);
 		if (IS_ERR(rdesc)) {
 			dev_err(priv->dev,
 				"cipher: invalidate: could not retrieve the result descriptor\n");

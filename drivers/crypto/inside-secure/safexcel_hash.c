@@ -229,7 +229,7 @@ static int safexcel_handle_req_result(struct safexcel_crypto_priv *priv,
 
 	*ret = 0;
 
-	rdesc = safexcel_ring_next_rptr(&priv->ring[ring].rdr);
+	rdesc = safexcel_rdr_next_rptr(&priv->ring[ring].rdr);
 	if (IS_ERR(rdesc)) {
 		dev_err(priv->dev,
 			"hash: result: could not retrieve the result descriptor\n");
@@ -514,7 +514,7 @@ static int safexcel_handle_inv_result(struct safexcel_crypto_priv *priv,
 
 	*ret = 0;
 
-	rdesc = safexcel_ring_next_rptr(&priv->ring[ring].rdr);
+	rdesc = safexcel_rdr_next_rptr(&priv->ring[ring].rdr);
 	if (IS_ERR(rdesc)) {
 		dev_err(priv->dev,
 			"hash: invalidate: could not retrieve the result descriptor\n");

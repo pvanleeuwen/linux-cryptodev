@@ -552,7 +552,7 @@ static int safexcel_hw_setup_rdesc_rings(struct safexcel_crypto_priv *priv)
 		       priv->config.rd_size,
 		       EIP197_HIA_RDR(priv, i) + EIP197_HIA_xDR_DESC_SIZE);
 
-		writel(((rd_fetch_cnt *
+		writel(EIP197_HIA_xDR_OWM_ENABLE | ((rd_fetch_cnt *
 			 (rd_size_rnd << priv->hwconfig.hwdataw)) << 16) |
 		       (rd_fetch_cnt * (priv->config.rd_offset / sizeof(u32))),
 		       EIP197_HIA_RDR(priv, i) + EIP197_HIA_xDR_CFG);
@@ -561,6 +561,8 @@ static int safexcel_hw_setup_rdesc_rings(struct safexcel_crypto_priv *priv)
 		val = EIP197_HIA_xDR_CFG_WR_CACHE(WR_CACHE_3BITS);
 		val |= EIP197_HIA_xDR_CFG_RD_CACHE(RD_CACHE_3BITS);
 		val |= EIP197_HIA_xDR_WR_RES_BUF | EIP197_HIA_xDR_WR_CTRL_BUF;
+		if (priv->flags & SAFEXCEL_HW_EIP197)
+			val |= EIP197_HIA_xDR_PAD_TO_OFFSET; /* for own word */
 		writel(val,
 		       EIP197_HIA_RDR(priv, i) + EIP197_HIA_xDR_DMA_CFG);
 
@@ -975,26 +977,15 @@ static inline void safexcel_handle_result_descriptor(struct safexcel_crypto_priv
 {
 	struct crypto_async_request *req;
 	struct safexcel_context *ctx;
-	int ret, i, nreq, handled = 0;
+	int ret, nreq, handled;
 	bool should_complete;
 
 	/* Written threshold = guaranteed to be available */
-	i = nreq = priv->ring[ring].thresh_written;
-
-	/* Acknowledge any processed packets */
-	while (unlikely(EIP197_MAX_BATCH_SZ > EIP197_xDR_PROC_xD_PKT_MASK &&
-			i > EIP197_xDR_PROC_xD_PKT_MASK)) {
-		writel(EIP197_xDR_PROC_xD_PKT(EIP197_xDR_PROC_xD_PKT_MASK),
-		       EIP197_HIA_RDR(priv, ring) + EIP197_HIA_xDR_PROC_COUNT);
-		i -= EIP197_xDR_PROC_xD_PKT_MASK;
-	}
-	writel(EIP197_xDR_PROC_xD_PKT(i),
-	       EIP197_HIA_RDR(priv, ring) + EIP197_HIA_xDR_PROC_COUNT);
+	handled = nreq = priv->ring[ring].thresh_written;
 
 	/* Actually process the pending requests */
-	handled += nreq;
-	while (nreq) {
 more_requests:
+	do {
 		req = safexcel_rdr_req_get(priv, ring);
 		ctx = crypto_tfm_ctx(req->tfm);
 		ctx->handle_result(priv, ring, req,
@@ -1004,20 +995,25 @@ more_requests:
 			req->complete(req, ret);
 			local_bh_enable();
 		}
-		nreq--;
-	}
+	} while (--nreq);
 
 	/* Peek if we have more pending now */
-	nreq = readl(EIP197_HIA_RDR(priv, ring) +
-		     EIP197_HIA_xDR_PROC_COUNT);
-	if (likely(nreq & (EIP197_xDR_PROC_xD_PKT_MASK <<
-			   EIP197_xDR_PROC_xD_PKT_OFFSET))) {
-		nreq >>= EIP197_xDR_PROC_xD_PKT_OFFSET;
-		writel(EIP197_xDR_PROC_xD_PKT(nreq),
-		       EIP197_HIA_RDR(priv, ring) + EIP197_HIA_xDR_PROC_COUNT);
+	nreq = safexcel_rdr_scan_next(&priv->ring[ring].rdr);
+	if (likely(nreq)) {
 		handled += nreq;
 		goto more_requests;
 	}
+
+	/* Acknowledge all handled descriptors */
+	nreq = handled;
+	while (unlikely(nreq > EIP197_xDR_PROC_xD_PKT_MASK)) {
+		writel(EIP197_xDR_PROC_xD_PKT(EIP197_xDR_PROC_xD_PKT_MASK),
+		       EIP197_HIA_RDR(priv, ring) + EIP197_HIA_xDR_PROC_COUNT);
+		nreq -= EIP197_xDR_PROC_xD_PKT_MASK;
+	}
+
+	writel(EIP197_xDR_PROC_xD_PKT(nreq),
+	       EIP197_HIA_RDR(priv, ring) + EIP197_HIA_xDR_PROC_COUNT);
 
 	/* Update the pending count and write a new threshold if > 0 */
 	spin_lock_bh(&priv->ring[ring].lock);
@@ -1296,13 +1292,15 @@ static void safexcel_configure(struct safexcel_crypto_priv *priv)
 	/* now the size of the descr is this 1st part plus the result struct */
 	priv->config.rd_size    = priv->config.res_offset +
 				  EIP197_RD64_RESULT_SIZE;
+	/* Add one *buswidth* word for the ownership word */
+	priv->config.rd_offset  = priv->config.rd_size + mask + 1;
 	/*
 	 * Round size up to next higher power of 2 for offset.
 	 * This also guarantees it to be an integer multiple of the buswidth.
 	 * (and will usually make it a multiple of the cacheline size as well)
 	 */
-	tmp = 1 << __fls(priv->config.rd_size);
-	if (tmp == priv->config.rd_size)
+	tmp = 1 << __fls(priv->config.rd_offset);
+	if (tmp == priv->config.rd_offset)
 		priv->config.rd_offset = tmp;
 	else
 		priv->config.rd_offset = tmp * 2;

@@ -44,7 +44,7 @@
 #define EIP197_MAX_TOKENS			16
 #define EIP197_MAX_RINGS			4
 #define EIP197_FETCH_DEPTH			2
-/* Higher values (max is 65535) reduce CPU load, but are worse for latency */
+/* Higher values (keep <= 127!) reduce CPU load, but are worse for latency */
 #define EIP197_MAX_BATCH_SZ			64
 #define EIP197_MAX_RING_AIC			14
 
@@ -211,11 +211,15 @@
 #define EIP197_xDR_DESC_MODE_64BIT		BIT(31)
 #define EIP197_CDR_DESC_MODE_ADCP		BIT(30)
 
+/* EIP197_HIA_xDR_CFG */
+#define EIP197_HIA_xDR_OWM_ENABLE		BIT(31)
+
 /* EIP197_HIA_xDR_DMA_CFG */
 #define EIP197_HIA_xDR_WR_RES_BUF		BIT(22)
 #define EIP197_HIA_xDR_WR_CTRL_BUF		BIT(23)
 #define EIP197_HIA_xDR_WR_OWN_BUF		BIT(24)
 #define EIP197_HIA_xDR_CFG_WR_CACHE(n)		(((n) & 0x7) << 25)
+#define EIP197_HIA_xDR_PAD_TO_OFFSET		BIT(28)
 #define EIP197_HIA_xDR_CFG_RD_CACHE(n)		(((n) & 0x7) << 29)
 
 /* EIP197_HIA_CDR_THRESH */
@@ -548,6 +552,14 @@ static inline void upd_desc_set(void *desc, u32 first_seg, u32 last_seg,
 					 sizeof(u32))
 #define EIP197_RD64_RESULT_SIZE		(sizeof(struct result_data_desc) /\
 					 sizeof(u32))
+
+/*
+ * Ownership word polling control.
+ * Works around potential stability issue with HW2.6 and older,
+ * may reduce interrupt rate.
+ */
+#define EIP197_OWN_POLL_COUNT			10
+#define EIP197_OWNERSHIP_MAGIC			0xAAAAAAAA
 
 struct safexcel_token {
 	u32 packet_length:17;
@@ -939,7 +951,8 @@ int safexcel_invalidate_cache(struct crypto_async_request *async,
 int safexcel_init_ring_descriptors(struct safexcel_crypto_priv *priv,
 				   struct safexcel_desc_ring *cdr,
 				   struct safexcel_desc_ring *rdr);
-void *safexcel_ring_next_rptr(struct safexcel_desc_ring *ring);
+void *safexcel_rdr_next_rptr(struct safexcel_desc_ring *ring);
+int safexcel_rdr_scan_next(struct safexcel_desc_ring *ring);
 void safexcel_ring_rollback_wptr(struct safexcel_desc_ring *ring);
 struct safexcel_command_desc *safexcel_add_cdesc(struct safexcel_desc_ring *ring,
 						 bool first, bool last,
