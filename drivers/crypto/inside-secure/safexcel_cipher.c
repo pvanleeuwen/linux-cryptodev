@@ -628,32 +628,11 @@ static int safexcel_handle_req_result(struct safexcel_crypto_priv *priv, int rin
 				      struct scatterlist *dst,
 				      unsigned int cryptlen,
 				      struct safexcel_cipher_req *sreq,
-				      bool *should_complete, int *ret)
+				      bool *should_complete)
 {
 	struct skcipher_request *areq = skcipher_request_cast(async);
 	struct crypto_skcipher *skcipher = crypto_skcipher_reqtfm(areq);
 	struct safexcel_cipher_ctx *ctx = crypto_skcipher_ctx(skcipher);
-	struct safexcel_result_desc *rdesc;
-	int ndesc = 0;
-
-	*ret = 0;
-
-	if (unlikely(!sreq->rdescs))
-		return 0;
-
-	while (sreq->rdescs--) {
-		rdesc = safexcel_rdr_next_rptr(&priv->ring[ring].rdr);
-		if (IS_ERR(rdesc)) {
-			dev_err(priv->dev,
-				"cipher: result: could not retrieve the result descriptor\n");
-			*ret = PTR_ERR(rdesc);
-			break;
-		}
-		ndesc++;
-	}
-	*ret = safexcel_rdesc_check_errors(priv, rdesc);
-
-	safexcel_complete(priv, ring);
 
 	if (src == dst) {
 		dma_unmap_sg(priv->dev, src, sreq->nr_src, DMA_BIDIRECTIONAL);
@@ -676,7 +655,7 @@ static int safexcel_handle_req_result(struct safexcel_crypto_priv *priv, int rin
 
 	*should_complete = true;
 
-	return ndesc;
+	return true;
 }
 
 static int safexcel_send_req(struct crypto_async_request *base, int ring,
@@ -889,7 +868,7 @@ static int safexcel_send_req(struct crypto_async_request *base, int ring,
 		n_rdesc = 1;
 	}
 
-	safexcel_rdr_req_set(priv, ring, first_rdesc, base);
+	safexcel_rdr_req_set(&priv->ring[ring], first_rdesc, base);
 
 	*commands = n_cdesc;
 	*results = n_rdesc;
@@ -915,31 +894,10 @@ unmap_sg_buffers:
 static int safexcel_handle_inv_result(struct safexcel_crypto_priv *priv,
 				      int ring,
 				      struct crypto_async_request *base,
-				      struct safexcel_cipher_req *sreq,
 				      bool *should_complete, int *ret)
 {
 	struct safexcel_cipher_ctx *ctx = crypto_tfm_ctx(base->tfm);
-	struct safexcel_result_desc *rdesc;
-	int ndesc = 0, enq_ret;
-
-	*ret = 0;
-
-	if (unlikely(!sreq->rdescs))
-		return 0;
-
-	while (sreq->rdescs--) {
-		rdesc = safexcel_rdr_next_rptr(&priv->ring[ring].rdr);
-		if (IS_ERR(rdesc)) {
-			dev_err(priv->dev,
-				"cipher: invalidate: could not retrieve the result descriptor\n");
-			*ret = PTR_ERR(rdesc);
-			break;
-		}
-		ndesc++;
-	}
-	*ret = safexcel_rdesc_check_errors(priv, rdesc);
-
-	safexcel_complete(priv, ring);
+	int enq_ret;
 
 	if (ctx->base.exit_inv) {
 		dma_pool_free(priv->context_pool, ctx->base.ctxr,
@@ -947,7 +905,7 @@ static int safexcel_handle_inv_result(struct safexcel_crypto_priv *priv,
 
 		*should_complete = true;
 
-		return ndesc;
+		return true;
 	}
 
 	ring = safexcel_select_ring(priv);
@@ -965,53 +923,67 @@ static int safexcel_handle_inv_result(struct safexcel_crypto_priv *priv,
 
 	*should_complete = false;
 
-	return ndesc;
+	return true;
 }
 
 static int safexcel_skcipher_handle_result(struct safexcel_crypto_priv *priv,
 					   int ring,
+					   struct safexcel_result_desc *rdesc,
 					   struct crypto_async_request *async,
 					   bool *should_complete, int *ret)
 {
 	struct skcipher_request *req = skcipher_request_cast(async);
 	struct safexcel_cipher_req *sreq = skcipher_request_ctx(req);
-	int err;
 
-	if (sreq->needs_inv) {
-		sreq->needs_inv = false;
-		err = safexcel_handle_inv_result(priv, ring, async, sreq,
-						 should_complete, ret);
-	} else {
-		err = safexcel_handle_req_result(priv, ring, async, req->src,
-						 req->dst, req->cryptlen, sreq,
-						 should_complete, ret);
-	}
+	while  (--sreq->rdescs) {
+		rdesc = safexcel_rdr_next_rptr(&priv->ring[ring].rdr);
+		if (!rdesc)
+			return false;
+	};
 
-	return err;
+	*ret = safexcel_rdesc_check_errors(priv, rdesc);
+	safexcel_complete(priv, ring);
+
+	if (likely(!sreq->needs_inv))
+		return safexcel_handle_req_result(priv, ring, async,
+						  req->src, req->dst,
+						  req->cryptlen, sreq,
+						  should_complete);
+
+	sreq->needs_inv = false;
+	return safexcel_handle_inv_result(priv, ring, async,
+					  should_complete, ret);
 }
 
 static int safexcel_aead_handle_result(struct safexcel_crypto_priv *priv,
 				       int ring,
+				       struct safexcel_result_desc *rdesc,
 				       struct crypto_async_request *async,
 				       bool *should_complete, int *ret)
 {
 	struct aead_request *req = aead_request_cast(async);
-	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct safexcel_cipher_req *sreq = aead_request_ctx(req);
-	int err;
 
-	if (sreq->needs_inv) {
-		sreq->needs_inv = false;
-		err = safexcel_handle_inv_result(priv, ring, async, sreq,
-						 should_complete, ret);
-	} else {
-		err = safexcel_handle_req_result(priv, ring, async, req->src,
-						 req->dst,
-						 req->cryptlen + crypto_aead_authsize(tfm),
-						 sreq, should_complete, ret);
+	while  (--sreq->rdescs) {
+		rdesc = safexcel_rdr_next_rptr(&priv->ring[ring].rdr);
+		if (!rdesc)
+			return false;
+	};
+
+	*ret = safexcel_rdesc_check_errors(priv, rdesc);
+	safexcel_complete(priv, ring);
+
+	if (likely(!sreq->needs_inv)) {
+		struct crypto_aead *tfm = crypto_aead_reqtfm(req);
+		return safexcel_handle_req_result(priv, ring, async,
+						  req->src, req->dst,
+						  req->cryptlen +
+					  	  crypto_aead_authsize(tfm),
+						  sreq, should_complete);
 	}
-
-	return err;
+	sreq->needs_inv = false;
+	return safexcel_handle_inv_result(priv, ring, async,
+					  should_complete, ret);
 }
 
 static int safexcel_cipher_send_inv(struct crypto_async_request *base,

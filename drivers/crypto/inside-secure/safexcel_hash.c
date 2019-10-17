@@ -218,27 +218,13 @@ static int safexcel_ahash_enqueue(struct ahash_request *areq);
 static int safexcel_handle_req_result(struct safexcel_crypto_priv *priv,
 				      int ring,
 				      struct crypto_async_request *async,
-				      bool *should_complete, int *ret)
+				      bool *should_complete)
 {
-	struct safexcel_result_desc *rdesc;
 	struct ahash_request *areq = ahash_request_cast(async);
 	struct crypto_ahash *ahash = crypto_ahash_reqtfm(areq);
 	struct safexcel_ahash_req *sreq = ahash_request_ctx(areq);
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(ahash);
 	u64 cache_len;
-
-	*ret = 0;
-
-	rdesc = safexcel_rdr_next_rptr(&priv->ring[ring].rdr);
-	if (IS_ERR(rdesc)) {
-		dev_err(priv->dev,
-			"hash: result: could not retrieve the result descriptor\n");
-		*ret = PTR_ERR(rdesc);
-	} else {
-		*ret = safexcel_rdesc_check_errors(priv, rdesc);
-	}
-
-	safexcel_complete(priv, ring);
 
 	if (sreq->nents) {
 		dma_unmap_sg(priv->dev, areq->src, sreq->nents, DMA_TO_DEVICE);
@@ -296,7 +282,7 @@ static int safexcel_handle_req_result(struct safexcel_crypto_priv *priv,
 
 	*should_complete = true;
 
-	return 1;
+	return true;
 }
 
 static int safexcel_ahash_send_req(struct crypto_async_request *async, int ring,
@@ -471,7 +457,7 @@ send_command:
 		goto unmap_result;
 	}
 
-	safexcel_rdr_req_set(priv, ring, rdesc, &areq->base);
+	safexcel_rdr_req_set(&priv->ring[ring], rdesc, &areq->base);
 
 	req->processed += len - extra;
 
@@ -506,24 +492,10 @@ static int safexcel_handle_inv_result(struct safexcel_crypto_priv *priv,
 				      struct crypto_async_request *async,
 				      bool *should_complete, int *ret)
 {
-	struct safexcel_result_desc *rdesc;
 	struct ahash_request *areq = ahash_request_cast(async);
 	struct crypto_ahash *ahash = crypto_ahash_reqtfm(areq);
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(ahash);
 	int enq_ret;
-
-	*ret = 0;
-
-	rdesc = safexcel_rdr_next_rptr(&priv->ring[ring].rdr);
-	if (IS_ERR(rdesc)) {
-		dev_err(priv->dev,
-			"hash: invalidate: could not retrieve the result descriptor\n");
-		*ret = PTR_ERR(rdesc);
-	} else {
-		*ret = safexcel_rdesc_check_errors(priv, rdesc);
-	}
-
-	safexcel_complete(priv, ring);
 
 	if (ctx->base.exit_inv) {
 		dma_pool_free(priv->context_pool, ctx->base.ctxr,
@@ -548,29 +520,27 @@ static int safexcel_handle_inv_result(struct safexcel_crypto_priv *priv,
 
 	*should_complete = false;
 
-	return 1;
+	return true;
 }
 
 static int safexcel_handle_result(struct safexcel_crypto_priv *priv, int ring,
+				  struct safexcel_result_desc *rdesc,
 				  struct crypto_async_request *async,
 				  bool *should_complete, int *ret)
 {
 	struct ahash_request *areq = ahash_request_cast(async);
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
-	int err;
 
-	BUG_ON(!(priv->flags & EIP197_TRC_CACHE) && req->needs_inv);
+	*ret = safexcel_rdesc_check_errors(priv, rdesc);
+	safexcel_complete(priv, ring);
 
-	if (req->needs_inv) {
-		req->needs_inv = false;
-		err = safexcel_handle_inv_result(priv, ring, async,
-						 should_complete, ret);
-	} else {
-		err = safexcel_handle_req_result(priv, ring, async,
-						 should_complete, ret);
-	}
+	if (likely(!req->needs_inv))
+		return safexcel_handle_req_result(priv, ring, async,
+						  should_complete);
 
-	return err;
+	req->needs_inv = false;
+	return safexcel_handle_inv_result(priv, ring, async,
+					  should_complete, ret);
 }
 
 static int safexcel_ahash_send_inv(struct crypto_async_request *async,

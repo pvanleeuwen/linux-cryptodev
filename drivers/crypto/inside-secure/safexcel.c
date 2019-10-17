@@ -792,48 +792,50 @@ static int safexcel_hw_init(struct safexcel_crypto_priv *priv)
 
 /* Called with ring's lock taken */
 static inline void safexcel_try_push_requests(struct safexcel_crypto_priv *priv,
-					      int ring)
+					      int ring_id,
+					      struct safexcel_ring *ring)
 {
-	int coal = min_t(int, priv->ring[ring].requests, EIP197_MAX_BATCH_SZ);
+	int coal = min_t(int, ring->requests, EIP197_MAX_BATCH_SZ);
 
 	/* Configure when we want an interrupt */
 	writel(EIP197_HIA_RDR_THRESH_PKT_MODE |
 	       EIP197_HIA_RDR_THRESH_PROC_PKT(coal),
-	       EIP197_HIA_RDR(priv, ring) + EIP197_HIA_xDR_THRESH);
+	       EIP197_HIA_RDR(priv, ring_id) + EIP197_HIA_xDR_THRESH);
 
 	/* Remember the threshold value actually written */
-	priv->ring[ring].thresh_written = coal;
+	ring->thresh_written = coal;
 }
 
-void safexcel_dequeue(struct safexcel_crypto_priv *priv, int ring)
+void safexcel_dequeue(struct safexcel_crypto_priv *priv, int ring_id)
 {
 	struct crypto_async_request *req, *backlog;
 	struct safexcel_context *ctx;
+	struct safexcel_ring *ring = &priv->ring[ring_id];
 	int ret, nreq = 0, cdesc = 0, rdesc = 0, commands, results;
 
 	/* If a request wasn't properly dequeued because of a lack of resources,
 	 * proceeded it first,
 	 */
-	req = priv->ring[ring].req;
-	backlog = priv->ring[ring].backlog;
+	req = ring->req;
+	backlog = ring->backlog;
 	if (req)
 		goto handle_req;
 
 	while (true) {
-		spin_lock_bh(&priv->ring[ring].queue_lock);
-		backlog = crypto_get_backlog(&priv->ring[ring].queue);
-		req = crypto_dequeue_request(&priv->ring[ring].queue);
-		spin_unlock_bh(&priv->ring[ring].queue_lock);
+		spin_lock_bh(&ring->queue_lock);
+		backlog = crypto_get_backlog(&ring->queue);
+		req = crypto_dequeue_request(&ring->queue);
+		spin_unlock_bh(&ring->queue_lock);
 
 		if (!req) {
-			priv->ring[ring].req = NULL;
-			priv->ring[ring].backlog = NULL;
+			ring->req = NULL;
+			ring->backlog = NULL;
 			goto finalize;
 		}
 
 handle_req:
 		ctx = crypto_tfm_ctx(req->tfm);
-		ret = ctx->send(req, ring, &commands, &results);
+		ret = ctx->send(req, ring_id, &commands, &results);
 		if (ret)
 			goto request_failed;
 
@@ -856,8 +858,8 @@ request_failed:
 	/* Not enough resources to handle all the requests. Bail out and save
 	 * the request and the backlog for the next dequeue call (per-ring).
 	 */
-	priv->ring[ring].req = req;
-	priv->ring[ring].backlog = backlog;
+	ring->req = req;
+	ring->backlog = backlog;
 
 finalize:
 	if (!nreq)
@@ -865,22 +867,22 @@ finalize:
 
 	/* let the CDR know we have pending descriptors */
 	writel((cdesc * priv->config.cd_offset),
-	       EIP197_HIA_CDR(priv, ring) + EIP197_HIA_xDR_PREP_COUNT);
+	       EIP197_HIA_CDR(priv, ring_id) + EIP197_HIA_xDR_PREP_COUNT);
 
 	/* Request interrupt for new newly queued requests */
-	spin_lock_bh(&priv->ring[ring].lock);
+	spin_lock_bh(&ring->lock);
 
-	priv->ring[ring].requests += nreq;
-	if (!priv->ring[ring].busy) {
-		safexcel_try_push_requests(priv, ring);
-		priv->ring[ring].busy = true;
+	ring->requests += nreq;
+	if (!ring->busy) {
+		safexcel_try_push_requests(priv, ring_id, ring);
+		ring->busy = true;
 	}
 
-	spin_unlock_bh(&priv->ring[ring].lock);
+	spin_unlock_bh(&ring->lock);
 
 	/* let the RDR know we have pending descriptors */
 	writel((rdesc * priv->config.rd_offset),
-	       EIP197_HIA_RDR(priv, ring) + EIP197_HIA_xDR_PREP_COUNT);
+	       EIP197_HIA_RDR(priv, ring_id) + EIP197_HIA_xDR_PREP_COUNT);
 }
 
 int safexcel_rdesc_report_errors(struct safexcel_crypto_priv *priv,
@@ -936,12 +938,13 @@ void safexcel_inv_complete(struct crypto_async_request *req, int error)
 
 int safexcel_invalidate_cache(struct crypto_async_request *async,
 			      struct safexcel_crypto_priv *priv,
-			      dma_addr_t ctxr_dma, int ring)
+			      dma_addr_t ctxr_dma, int ring_id)
 {
 	struct safexcel_command_desc *cdesc;
 	struct safexcel_result_desc *rdesc;
-	struct safexcel_desc_ring *cdr = &priv->ring[ring].cdr;
-	struct safexcel_desc_ring *rdr = &priv->ring[ring].rdr;
+	struct safexcel_ring *ring = &priv->ring[ring_id];
+	struct safexcel_desc_ring *cdr = &ring->cdr;
+	struct safexcel_desc_ring *rdr = &ring->rdr;
 	struct safexcel_token  *dmmy;
 	int ret = 0;
 
@@ -962,7 +965,7 @@ int safexcel_invalidate_cache(struct crypto_async_request *async,
 		goto cdesc_rollback;
 	}
 
-	safexcel_rdr_req_set(priv, ring, rdesc, async);
+	safexcel_rdr_req_set(ring, rdesc, async);
 
 	return ret;
 
@@ -973,60 +976,72 @@ cdesc_rollback:
 }
 
 static inline void safexcel_handle_result_descriptor(struct safexcel_crypto_priv *priv,
-						     int ring)
+						     int ring_id,
+						     struct safexcel_ring *ring)
 {
-	struct crypto_async_request *req;
+	struct safexcel_result_desc *rdesc;
 	struct safexcel_context *ctx;
-	int ret, nreq, handled;
+	struct crypto_async_request *req;
 	bool should_complete;
+	int ret, handled = 0;
 
-	/* Written threshold = guaranteed to be available */
-	handled = nreq = priv->ring[ring].thresh_written;
-
-	/* Actually process the pending requests */
-more_requests:
+	/* Actually process _any_ pending processed packets */
+	/* Wait a bit for very first result descriptor to become available */
+	safexcel_rdr_next_rdesc_wait(&ring->rdr);
 	do {
-		req = safexcel_rdr_req_get(priv, ring);
+		/* Must get req ptr first as next_rptr moves the pointer! */
+		req = safexcel_rdr_req_get(ring);
+		/*
+		 * Peek at next descriptor for current packet. Need to do this
+		 * first because req ptr will not be valid if the packet
+		 * hasn't actually been queued yet - so we can't deref it then.
+		 */
+		rdesc = safexcel_rdr_next_rptr_np(&ring->rdr);
+		if (unlikely(!rdesc))
+			break; /* Not present: done! */
 		ctx = crypto_tfm_ctx(req->tfm);
-		ctx->handle_result(priv, ring, req,
-				   &should_complete, &ret);
+		if (unlikely(!ctx->handle_result(priv, ring_id, rdesc, req,
+						 &should_complete, &ret))) {
+			/*
+			 * Packet not _fully_ present yet, need to store the
+			 * req pointer at the current descriptor location so
+			 * we can continue on the next entry of this handler.
+			 */
+			safexcel_rdr_req_set(ring, ring->rdr.read, req);
+			break;
+		}
+		/* Packet was fully present, complete it if not INV resp */
 		if (likely(should_complete)) {
 			local_bh_disable();
 			req->complete(req, ret);
 			local_bh_enable();
 		}
-	} while (--nreq);
+		handled++;
+	} while (handled < ring->requests);
 
-	/* Peek if we have more pending now */
-	nreq = safexcel_rdr_scan_next(&priv->ring[ring].rdr);
-	if (likely(nreq)) {
-		handled += nreq;
-		goto more_requests;
-	}
-
-	/* Acknowledge all handled descriptors */
-	nreq = handled;
-	while (unlikely(nreq > EIP197_xDR_PROC_xD_PKT_MASK)) {
+	/* Acknowledge all handled packets */
+	ret = handled;
+	while (unlikely(ret > EIP197_xDR_PROC_xD_PKT_MASK)) {
 		writel(EIP197_xDR_PROC_xD_PKT(EIP197_xDR_PROC_xD_PKT_MASK),
-		       EIP197_HIA_RDR(priv, ring) + EIP197_HIA_xDR_PROC_COUNT);
-		nreq -= EIP197_xDR_PROC_xD_PKT_MASK;
+		       EIP197_HIA_RDR(priv, ring_id) + EIP197_HIA_xDR_PROC_COUNT);
+		ret -= EIP197_xDR_PROC_xD_PKT_MASK;
 	}
 
-	writel(EIP197_xDR_PROC_xD_PKT(nreq),
-	       EIP197_HIA_RDR(priv, ring) + EIP197_HIA_xDR_PROC_COUNT);
+	writel(EIP197_xDR_PROC_xD_PKT(ret),
+	       EIP197_HIA_RDR(priv, ring_id) + EIP197_HIA_xDR_PROC_COUNT);
 
 	/* Update the pending count and write a new threshold if > 0 */
-	spin_lock_bh(&priv->ring[ring].lock);
+	spin_lock_bh(&ring->lock);
 
-	priv->ring[ring].requests -= handled;
-	if (likely(priv->ring[ring].requests)) {
-		safexcel_try_push_requests(priv, ring);
+	ring->requests -= handled;
+	if (likely(ring->requests)) {
+		safexcel_try_push_requests(priv, ring_id, ring);
 	} else {
-		priv->ring[ring].busy = false;
-		priv->ring[ring].thresh_written = 0;
+		ring->busy = false;
+		ring->thresh_written = 0;
 	}
 
-	spin_unlock_bh(&priv->ring[ring].lock);
+	spin_unlock_bh(&ring->lock);
 }
 
 static void safexcel_dequeue_work(struct work_struct *work)
@@ -1052,19 +1067,18 @@ static irqreturn_t safexcel_irq_ring(int irq, void *data)
 	/* ACK all RDR interrupts, clear all threshold requests */
 	writel(0xff, EIP197_HIA_RDR(priv, ring) + EIP197_HIA_xDR_STAT);
 
-	/* Handle normal processing IRQ in threaded handler */
-	if (likely(stat & EIP197_xDR_THRESH))
-		return IRQ_WAKE_THREAD;
-
 	/* Catch error interrupt */
-	if (unlikely(stat & EIP197_xDR_ERR)) {
+	if (unlikely(stat & EIP197_xDR_ERR))
 		/*
 		 * Fatal error, the RDR is unusable and must be
 		 * reinitialized. This should not happen under
 		 * normal circumstances.
 		 */
 		dev_err(priv->dev, "RDR: fatal error");
-	}
+	else if (likely(stat & EIP197_xDR_THRESH))
+		/* Handle normal processing IRQ in threaded handler */
+		return IRQ_WAKE_THREAD;
+
 	return IRQ_HANDLED;
 }
 
@@ -1072,12 +1086,12 @@ static irqreturn_t safexcel_irq_ring_thread(int irq, void *data)
 {
 	struct safexcel_ring_irq_data *irq_data = data;
 	struct safexcel_crypto_priv *priv = irq_data->priv;
-	int ring = irq_data->ring;
+	int ring_id = irq_data->ring;
+	struct safexcel_ring *ring = &priv->ring[ring_id];
 
-	safexcel_handle_result_descriptor(priv, ring);
+	safexcel_handle_result_descriptor(priv, ring_id, ring);
 
-	queue_work(priv->ring[ring].workqueue,
-		   &priv->ring[ring].work_data.work);
+	queue_work(ring->workqueue, &ring->work_data.work);
 
 	return IRQ_HANDLED;
 }

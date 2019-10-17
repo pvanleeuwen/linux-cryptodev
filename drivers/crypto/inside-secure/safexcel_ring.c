@@ -129,14 +129,16 @@ static inline void *safexcel_ring_next_rptr(struct safexcel_desc_ring *ring)
 	return ptr;
 }
 
-void *safexcel_rdr_next_rptr(struct safexcel_desc_ring *ring)
+/* Get pointer to next rdesc, returns NULL if ownership not transferred yet */
+static inline void *safexcel_rdr_next_rptr_gen(struct safexcel_desc_ring *ring,
+					       int do_poll)
 {
 	void *ptr = ring->read;
 	void *nxt = ptr + ring->offset;
 	u32 *own = nxt - 4; /* Last dword written */
 	int cnt, ownok = *own == EIP197_OWNERSHIP_MAGIC;
 
-have_rdesc:
+rdesc_found:
 	if (likely(ownok && ptr != ring->base_end)) {
 		ring->read = nxt;
 		/* Clear the ownership word to avoid biting our tail later! */
@@ -150,42 +152,42 @@ have_rdesc:
 		*own = ~EIP197_OWNERSHIP_MAGIC;
 		return ptr;
 	}
+	if (!do_poll)
+		return NULL;
 
-	/* If the ownership word is not there yet, then wait for it a bit */
 	cnt = EIP197_OWN_POLL_COUNT;
+	ownok = true;
 
 	/* Poll ring for ownership word */
-	do {
-		if (likely(*own == EIP197_OWNERSHIP_MAGIC))
-			goto have_rdesc;
+	while (!(ownok = (*own == EIP197_OWNERSHIP_MAGIC)) && --cnt)
 		cpu_relax();
-	} while (--cnt);
+	if (unlikely(ownok))
+		goto rdesc_found;
 
-	/* If polling failed then return a 'try again' error code */
-	return ERR_PTR(-EAGAIN);
+	/* Not ready yet */
+	return NULL;
 }
 
-/* Verify if next full packet is available already, using ownership words */
-int safexcel_rdr_scan_next(struct safexcel_desc_ring *ring)
+void *safexcel_rdr_next_rptr(struct safexcel_desc_ring *ring)
 {
-	struct safexcel_result_desc *rdesc;
-	u32 *own = ring->read + ring->offset - 4;
-	int pktcnt = 0;
+	return safexcel_rdr_next_rptr_gen(ring, 1);
+}
 
-	rdesc = ring->read;
-	while (*own == EIP197_OWNERSHIP_MAGIC) {
-		pktcnt += rdesc->last_seg;
+void *safexcel_rdr_next_rptr_np(struct safexcel_desc_ring *ring)
+{
+	return safexcel_rdr_next_rptr_gen(ring, 0);
+}
 
-		/* Move to next desc in ring, wrapping as required */
-		if (unlikely((void *)rdesc == ring->base_end)) {
-			rdesc = ring->base;
-			own   = ring->base + ring->offset - 4;
-		} else {
-			rdesc = (void *)own + 4;
-			own   = (void *)own + ring->offset;
-		}
-	}
-	return pktcnt;
+/* Wait a bit for next rdesc */
+void safexcel_rdr_next_rdesc_wait(struct safexcel_desc_ring *ring)
+{
+	void *ptr = ring->read;
+	void *nxt = ptr + ring->offset;
+	u32 *own = nxt - 4; /* Last dword written */
+	int cnt = EIP197_OWN_POLL_COUNT;
+
+	while (unlikely(*own != EIP197_OWNERSHIP_MAGIC && --cnt))
+		cpu_relax();
 }
 
 void safexcel_complete(struct safexcel_crypto_priv *priv, int ring)
