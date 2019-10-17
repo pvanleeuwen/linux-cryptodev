@@ -555,6 +555,10 @@ int ccp_dev_suspend(struct sp_device *sp, pm_message_t state)
 	unsigned long flags;
 	unsigned int i;
 
+	/* If there's no device there's nothing to do */
+	if (!ccp)
+		return 0;
+
 	spin_lock_irqsave(&ccp->cmd_lock, flags);
 
 	ccp->suspending = 1;
@@ -578,6 +582,10 @@ int ccp_dev_resume(struct sp_device *sp)
 	struct ccp_device *ccp = sp->ccp_data;
 	unsigned long flags;
 	unsigned int i;
+
+	/* If there's no device there's nothing to do */
+	if (!ccp)
+		return 0;
 
 	spin_lock_irqsave(&ccp->cmd_lock, flags);
 
@@ -633,17 +641,26 @@ int ccp_dev_init(struct sp_device *sp)
 		ccp->vdata->setup(ccp);
 
 	ret = ccp->vdata->perform->init(ccp);
-	if (ret)
+	if (ret) {
+		/* A positive number means that the device cannot be initialized,
+		 * but no additional message is required.
+		 */
+		if (ret > 0)
+			goto e_quiet;
+
+		/* An unexpected problem occurred, and should be reported in the log */
 		goto e_err;
+	}
 
 	dev_notice(dev, "ccp enabled\n");
 
 	return 0;
 
 e_err:
-	sp->ccp_data = NULL;
-
 	dev_notice(dev, "ccp initialization failed\n");
+
+e_quiet:
+	sp->ccp_data = NULL;
 
 	return ret;
 }
