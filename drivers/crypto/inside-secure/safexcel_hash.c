@@ -785,12 +785,8 @@ static int safexcel_ahash_final(struct ahash_request *areq)
 			memcpy(areq->result, sha512_zero_message_hash,
 			       SHA512_DIGEST_SIZE);
 		else if (ctx->alg == CONTEXT_CONTROL_CRYPTO_ALG_SM3) {
-			if (IS_ENABLED(CONFIG_CRYPTO_SM3))
-				memcpy(areq->result, sm3_zero_message_hash,
-				       SM3_DIGEST_SIZE);
-			else
-				memcpy(areq->result,
-				       EIP197_SM3_ZEROM_HASH, SM3_DIGEST_SIZE);
+			memcpy(areq->result,
+			       EIP197_SM3_ZEROM_HASH, SM3_DIGEST_SIZE);
 		}
 
 		return 0;
@@ -2109,10 +2105,7 @@ static int safexcel_xcbcmac_cra_init(struct crypto_tfm *tfm)
 
 	safexcel_ahash_cra_init(tfm);
 	ctx->kaes = crypto_alloc_cipher("aes", 0, 0);
-	if (IS_ERR(ctx->kaes))
-		return PTR_ERR(ctx->kaes);
-
-	return 0;
+	return PTR_ERR_OR_ZERO(ctx->kaes);
 }
 
 static void safexcel_xcbcmac_cra_exit(struct crypto_tfm *tfm)
