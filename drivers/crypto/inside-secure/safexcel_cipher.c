@@ -773,15 +773,13 @@ static int safexcel_send_req(struct crypto_async_request *base, int ring,
 	memcpy(ctx->base.ctxr->data, ctx->key, ctx->key_len);
 
 	/* The EIP cannot deal with zero length input packets! */
-	if (totlen == 0)
-		totlen = 1;
-
+	if (totlen)
 	/* command descriptors */
 	for_each_sg(src, sg, sreq->nr_src, i) {
 		int len = sg_dma_len(sg);
 
 		/* Do not overflow the request */
-		if (queued - len < 0)
+		if (queued < len)
 			len = queued;
 
 		cdesc = safexcel_add_cdesc(priv, ring, !n_cdesc,
@@ -793,24 +791,23 @@ static int safexcel_send_req(struct crypto_async_request *base, int ring,
 			ret = PTR_ERR(cdesc);
 			goto cdesc_rollback;
 		}
-		n_cdesc++;
 
-		if (n_cdesc == 1) {
+		if (!n_cdesc)
 			first_cdesc = cdesc;
-		}
 
+		n_cdesc++;
 		queued -= len;
 		if (!queued)
 			break;
-	}
-
-	if (unlikely(!n_cdesc)) {
+	} else {
 		/*
 		 * Special case: zero length input buffer.
 		 * The engine always needs the 1st command descriptor, however!
 		 */
-		first_cdesc = safexcel_add_cdesc(priv, ring, 1, 1, 0, 0, totlen,
-						 ctx->base.ctxr_dma, &atoken);
+		first_cdesc = safexcel_add_cdesc(priv, ring,
+						 1, 1, ctx->base.ctxr_dma,
+						 1, 1, ctx->base.ctxr_dma,
+						 &atoken);
 		n_cdesc = 1;
 	}
 
@@ -1495,6 +1492,7 @@ static int safexcel_des_setkey(struct crypto_skcipher *ctfm, const u8 *key,
 			       unsigned int len)
 {
 	struct safexcel_cipher_ctx *ctx = crypto_skcipher_ctx(ctfm);
+	struct safexcel_crypto_priv *priv = ctx->priv;
 	int ret;
 
 	ret = verify_skcipher_des_key(ctfm, key);
@@ -1502,7 +1500,7 @@ static int safexcel_des_setkey(struct crypto_skcipher *ctfm, const u8 *key,
 		return ret;
 
 	/* if context exits and key changed, need to invalidate it */
-	if (ctx->base.ctxr_dma)
+	if (priv->flags & EIP197_TRC_CACHE && ctx->base.ctxr_dma)
 		if (memcmp(ctx->key, key, len))
 			ctx->base.needs_inv = true;
 
@@ -1591,6 +1589,7 @@ static int safexcel_des3_ede_setkey(struct crypto_skcipher *ctfm,
 				   const u8 *key, unsigned int len)
 {
 	struct safexcel_cipher_ctx *ctx = crypto_skcipher_ctx(ctfm);
+	struct safexcel_crypto_priv *priv = ctx->priv;
 	int err;
 
 	err = verify_skcipher_des3_key(ctfm, key);
@@ -1598,10 +1597,9 @@ static int safexcel_des3_ede_setkey(struct crypto_skcipher *ctfm,
 		return err;
 
 	/* if context exits and key changed, need to invalidate it */
-	if (ctx->base.ctxr_dma) {
+	if (priv->flags & EIP197_TRC_CACHE && ctx->base.ctxr_dma)
 		if (memcmp(ctx->key, key, len))
 			ctx->base.needs_inv = true;
-	}
 
 	memcpy(ctx->key, key, len);
 
