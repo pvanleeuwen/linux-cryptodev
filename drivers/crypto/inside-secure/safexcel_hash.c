@@ -22,6 +22,8 @@ struct safexcel_ahash_ctx {
 	struct safexcel_context base;
 	struct safexcel_crypto_priv *priv;
 
+	int extra_req_bytes;
+	int req_align;
 	u32 alg;
 	u8  key_sz;
 	bool cbcmac;
@@ -56,17 +58,19 @@ struct safexcel_ahash_req {
 	u8 state_sz;    /* expected state size, only set once */
 	u8 block_sz;    /* block size, only set once */
 	u8 digest_sz;   /* output digest size, only set once */
-	__le32 state[SHA3_512_BLOCK_SIZE /
-		     sizeof(__le32)] __aligned(sizeof(__le32));
+	__le32 *state;  /* pointer to DMA safe state buffer  */
 
 	u64 len;
 	u64 processed;
 
-	u8 cache[HASH_CACHE_SIZE] __aligned(sizeof(u32));
+	u8 *cache; /* pointer to DMA safe cache buffer */
 	dma_addr_t cache_dma;
 	unsigned int cache_sz;
 
 	u8 cache_next[HASH_CACHE_SIZE] __aligned(sizeof(u32));
+
+	/* this is where the DMA buffers for state & cache end up */
+	u8 dma_buf_area[];
 };
 
 static inline u64 safexcel_queued_len(struct safexcel_ahash_req *req)
@@ -613,7 +617,6 @@ static int safexcel_ahash_send(struct crypto_async_request *async,
 		ret = safexcel_ahash_send_inv(async, ring, commands, results);
 	else
 		ret = safexcel_ahash_send_req(async, ring, commands, results);
-
 	return ret;
 }
 
@@ -889,6 +892,25 @@ static int safexcel_ahash_export(struct ahash_request *areq, void *out)
 	return 0;
 }
 
+static void safexcel_hash_req_init(struct safexcel_ahash_req *req,
+				   int req_align)
+{
+	memset(req, 0, sizeof(*req));
+
+	/*
+	 * put cache buffer at first cacheline aligned address at end of
+	 * struct safexcel_ahash_req
+	 */
+	req->cache = (u8 *)__ALIGN_MASK((uintptr_t)req->dma_buf_area,
+					(uintptr_t)req_align);
+	/*
+	 * put state buffer at first cacheline aligned address behind
+	 * the cache buffer
+	 */
+	req->state = (__le32 *)__ALIGN_MASK((uintptr_t)req->cache +
+					    HASH_CACHE_SIZE, (uintptr_t)req_align);
+}
+
 static int safexcel_ahash_import(struct ahash_request *areq, const void *in)
 {
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
@@ -921,9 +943,20 @@ static int safexcel_ahash_cra_init(struct crypto_tfm *tfm)
 	ctx->base.send = safexcel_ahash_send;
 	ctx->base.handle_result = safexcel_handle_result;
 	ctx->fb_do_setkey = false;
+	ctx->req_align = cache_line_size() - 1;
+
+	/*
+	 * compute how many bytes we need, worst case, to store cache
+	 * aligned buffers for cache and state, padding to the next
+	 * cacheline as well to avoid anything else ending up there
+	 */
+	ctx->extra_req_bytes = ctx->req_align; /* worst case to next line */
+	ctx->extra_req_bytes += __ALIGN_MASK(SHA3_512_BLOCK_SIZE, ctx->req_align);
+	ctx->extra_req_bytes += __ALIGN_MASK(HASH_CACHE_SIZE, ctx->req_align);
 
 	crypto_ahash_set_reqsize(__crypto_ahash_cast(tfm),
-				 sizeof(struct safexcel_ahash_req));
+				 sizeof(struct safexcel_ahash_req) +
+				 ctx->extra_req_bytes);
 	return 0;
 }
 
@@ -932,7 +965,7 @@ static int safexcel_sha1_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	ctx->alg = CONTEXT_CONTROL_CRYPTO_ALG_SHA1;
 	req->digest = CONTEXT_CONTROL_DIGEST_PRECOMPUTED;
@@ -1009,7 +1042,7 @@ static int safexcel_hmac_sha1_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Start from ipad precompute */
 	memcpy(req->state, ctx->ipad, SHA1_DIGEST_SIZE);
@@ -1106,7 +1139,7 @@ static int safexcel_hmac_init_iv(struct ahash_request *areq,
 				 unsigned int blocksize, u8 *pad, void *state)
 {
 	struct safexcel_ahash_result result;
-	struct safexcel_ahash_req *req;
+	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 	struct scatterlist sg;
 	int ret;
 
@@ -1120,7 +1153,6 @@ static int safexcel_hmac_init_iv(struct ahash_request *areq,
 	if (ret)
 		return ret;
 
-	req = ahash_request_ctx(areq);
 	req->hmac = true;
 	req->last_req = true;
 
@@ -1253,7 +1285,7 @@ static int safexcel_sha256_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	ctx->alg = CONTEXT_CONTROL_CRYPTO_ALG_SHA256;
 	req->digest = CONTEXT_CONTROL_DIGEST_PRECOMPUTED;
@@ -1310,7 +1342,7 @@ static int safexcel_sha224_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	ctx->alg = CONTEXT_CONTROL_CRYPTO_ALG_SHA224;
 	req->digest = CONTEXT_CONTROL_DIGEST_PRECOMPUTED;
@@ -1374,7 +1406,7 @@ static int safexcel_hmac_sha224_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Start from ipad precompute */
 	memcpy(req->state, ctx->ipad, SHA256_DIGEST_SIZE);
@@ -1446,7 +1478,7 @@ static int safexcel_hmac_sha256_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Start from ipad precompute */
 	memcpy(req->state, ctx->ipad, SHA256_DIGEST_SIZE);
@@ -1511,7 +1543,7 @@ static int safexcel_sha512_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	ctx->alg = CONTEXT_CONTROL_CRYPTO_ALG_SHA512;
 	req->digest = CONTEXT_CONTROL_DIGEST_PRECOMPUTED;
@@ -1568,7 +1600,7 @@ static int safexcel_sha384_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	ctx->alg = CONTEXT_CONTROL_CRYPTO_ALG_SHA384;
 	req->digest = CONTEXT_CONTROL_DIGEST_PRECOMPUTED;
@@ -1632,7 +1664,7 @@ static int safexcel_hmac_sha512_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Start from ipad precompute */
 	memcpy(req->state, ctx->ipad, SHA512_DIGEST_SIZE);
@@ -1704,7 +1736,7 @@ static int safexcel_hmac_sha384_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Start from ipad precompute */
 	memcpy(req->state, ctx->ipad, SHA512_DIGEST_SIZE);
@@ -1769,7 +1801,7 @@ static int safexcel_md5_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	ctx->alg = CONTEXT_CONTROL_CRYPTO_ALG_MD5;
 	req->digest = CONTEXT_CONTROL_DIGEST_PRECOMPUTED;
@@ -1826,7 +1858,7 @@ static int safexcel_hmac_md5_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Start from ipad precompute */
 	memcpy(req->state, ctx->ipad, MD5_DIGEST_SIZE);
@@ -1909,7 +1941,7 @@ static int safexcel_crc32_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Start from loaded key */
 	req->state[0]	= (__force __le32)le32_to_cpu(~ctx->ipad[0]);
@@ -1981,7 +2013,7 @@ static int safexcel_cbcmac_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Start from loaded keys */
 	memcpy(req->state, ctx->ipad, ctx->key_sz);
@@ -2264,7 +2296,7 @@ static int safexcel_sm3_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	ctx->alg = CONTEXT_CONTROL_CRYPTO_ALG_SM3;
 	req->digest = CONTEXT_CONTROL_DIGEST_PRECOMPUTED;
@@ -2328,7 +2360,7 @@ static int safexcel_hmac_sm3_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(crypto_ahash_reqtfm(areq));
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Start from ipad precompute */
 	memcpy(req->state, ctx->ipad, SM3_DIGEST_SIZE);
@@ -2394,7 +2426,7 @@ static int safexcel_sha3_224_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	ctx->alg = CONTEXT_CONTROL_CRYPTO_ALG_SHA3_224;
 	req->digest = CONTEXT_CONTROL_DIGEST_INITIAL;
@@ -2536,7 +2568,8 @@ static int safexcel_sha3_cra_init(struct crypto_tfm *tfm)
 	/* Update statesize from fallback algorithm! */
 	crypto_hash_alg_common(ahash)->statesize =
 		crypto_ahash_statesize(ctx->fback);
-	crypto_ahash_set_reqsize(ahash, max(sizeof(struct safexcel_ahash_req),
+	crypto_ahash_set_reqsize(ahash, max(sizeof(struct safexcel_ahash_req) +
+					    ctx->extra_req_bytes,
 					    sizeof(struct ahash_request) +
 					    crypto_ahash_reqsize(ctx->fback)));
 	return 0;
@@ -2587,7 +2620,7 @@ static int safexcel_sha3_256_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	ctx->alg = CONTEXT_CONTROL_CRYPTO_ALG_SHA3_256;
 	req->digest = CONTEXT_CONTROL_DIGEST_INITIAL;
@@ -2645,7 +2678,7 @@ static int safexcel_sha3_384_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	ctx->alg = CONTEXT_CONTROL_CRYPTO_ALG_SHA3_384;
 	req->digest = CONTEXT_CONTROL_DIGEST_INITIAL;
@@ -2703,7 +2736,7 @@ static int safexcel_sha3_512_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	ctx->alg = CONTEXT_CONTROL_CRYPTO_ALG_SHA3_512;
 	req->digest = CONTEXT_CONTROL_DIGEST_INITIAL;
@@ -2853,7 +2886,7 @@ static int safexcel_hmac_sha3_224_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Copy (half of) the key */
 	memcpy(req->state, ctx->ipad, SHA3_224_BLOCK_SIZE / 2);
@@ -2924,7 +2957,7 @@ static int safexcel_hmac_sha3_256_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Copy (half of) the key */
 	memcpy(req->state, ctx->ipad, SHA3_256_BLOCK_SIZE / 2);
@@ -2995,7 +3028,7 @@ static int safexcel_hmac_sha3_384_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Copy (half of) the key */
 	memcpy(req->state, ctx->ipad, SHA3_384_BLOCK_SIZE / 2);
@@ -3066,7 +3099,7 @@ static int safexcel_hmac_sha3_512_init(struct ahash_request *areq)
 	struct safexcel_ahash_ctx *ctx = crypto_ahash_ctx(tfm);
 	struct safexcel_ahash_req *req = ahash_request_ctx(areq);
 
-	memset(req, 0, sizeof(*req));
+	safexcel_hash_req_init(req, ctx->req_align);
 
 	/* Copy (half of) the key */
 	memcpy(req->state, ctx->ipad, SHA3_512_BLOCK_SIZE / 2);
